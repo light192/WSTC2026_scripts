@@ -1,0 +1,253 @@
+CriterionID	SubCriterion	MaxMark	AspectDescription	HowToMark	Requirement
+A1.1	A1	0.25	Hostname/FQDN всех VM соответствуют таблице хостов	"Выполнить:
+for h in sh-gw-a1 sh-client-a1 sz-gw-a1 sz-client-a1 files-a1 id-a1 web-a1; do
+  ssh root@$h 'hostname; hostname -f'
+done"	Каждый hostname соответствует заданию. FQDN имеет домен orion.a1.test и не возвращает localhost/старое имя.
+A1.2	A1	0.25	Часовой пояс, локаль и раскладка настроены на всех VM	"Выполнить:
+for h in sh-gw-a1 sh-client-a1 sz-gw-a1 sz-client-a1 files-a1 id-a1 web-a1; do
+  ssh root@$h 'timedatectl | grep ""Time zone""; localectl status'
+done"	Time zone: Europe/Paris. Locale содержит en_US.UTF-8. Keyboard layout: us, где применимо.
+A1.3	A1	0.5	IP-адресация IPv4/IPv6 соответствует таблице интерфейсов	"Выполнить:
+for h in sh-gw-a1 sh-client-a1 sz-gw-a1 sz-client-a1 files-a1 id-a1 web-a1; do
+  ssh root@$h 'hostname; ip -br address'
+done"	Все интерфейсы имеют требуемые IPv4/IPv6 адреса и prefix length согласно таблице задания. Лишние конфликтующие адреса отсутствуют.
+A1.4	A1	0.25	Default gateway на конечных хостах настроен корректно	"Выполнить:
+ssh root@sh-client-a1 'ip route show default'
+ssh root@sz-client-a1 'ip route show default'
+ssh root@files-a1 'ip route show default'
+ssh root@id-a1 'ip route show default'
+ssh root@web-a1 'ip route show default'"	sh-client via 10.11.10.1; sz-client via 10.11.20.1; files via 10.11.30.1; id/web via 10.11.40.1.
+A1.5	A1	0.5	Статические маршруты между Shanghai и Shenzhen настроены на gateway-серверах	"Выполнить:
+ssh root@sh-gw-a1 'ip route get 10.11.20.20; ip route get 10.11.30.10; ip route get 10.11.40.10; ip route get 10.11.40.20'
+ssh root@sz-gw-a1 'ip route get 10.11.10.20'"	sh-gw routes to Shenzhen networks via 198.51.100.20. sz-gw routes to SH-LAN via 198.51.100.10.
+A1.6	A1	0.25	IPv4/IPv6 forwarding включён на обоих gateway-серверах	"Выполнить:
+ssh root@sh-gw-a1 'sysctl net.ipv4.ip_forward net.ipv6.conf.all.forwarding'
+ssh root@sz-gw-a1 'sysctl net.ipv4.ip_forward net.ipv6.conf.all.forwarding'"	На обоих gateway: net.ipv4.ip_forward = 1 и net.ipv6.conf.all.forwarding = 1.
+A1.7	A1	0.5	IPv4-достижимость между площадками работает без NAT	"Выполнить:
+ssh root@sh-client-a1 'ping -c2 10.11.40.10; ping -c2 10.11.40.20; ping -c2 10.11.30.10'
+ssh root@sz-client-a1 'ping -c2 10.11.10.20'
+Проверка сохранения source IP:
+ssh root@web-a1 'timeout 8 tcpdump -ni any host 10.11.10.20 -c 2' &
+ssh root@sh-client-a1 'curl -s http://10.11.40.20/'"	ICMP проходит между площадками. На web-a1 виден source IP 10.11.10.20, а не адрес gateway; NAT между внутренними сетями отсутствует.
+A1.8	A1	0.25	IPv6-маршрутизация между площадками работает	"Выполнить:
+ssh root@sh-client-a1 'ping -6 -c2 2001:db8:a1:40::10; ping -6 -c2 2001:db8:a1:40::20'
+ssh root@sz-client-a1 'ping -6 -c2 2001:db8:a1:10::20'"	IPv6 ping между Shanghai и Shenzhen проходит по указанным префиксам.
+A1.9	A1	0.25	Настройки адресации, маршрутов и forwarding сохраняются после reboot	"Перезагрузить sh-gw-a1, sz-gw-a1, sh-client-a1, sz-client-a1.
+После восстановления выполнить:
+ssh root@sh-client-a1 'ping -c2 10.11.40.10'
+ssh root@sz-client-a1 'ping -c2 10.11.10.20'
+ssh root@sh-gw-a1 'sysctl net.ipv4.ip_forward net.ipv6.conf.all.forwarding'
+ssh root@sz-gw-a1 'sysctl net.ipv4.ip_forward net.ipv6.conf.all.forwarding'"	После reboot маршрутизация и forwarding работают без ручного восстановления.
+A2.1	A2	0.25	BIND9 на id-a1 запущен и слушает 53/tcp, 53/udp	"Выполнить:
+ssh root@id-a1 'systemctl is-active bind9 || systemctl is-active named'
+ssh root@id-a1 'ss -lntup | grep -E "":53\b""'"	DNS service active/running. Порты 53/tcp и 53/udp доступны на id-a1.
+A2.2	A2	0.25	Forward zone orion.a1.test обслуживает A-записи всех основных хостов	"Выполнить:
+for n in sh-client-a1 sz-client-a1 files-a1 id-a1 web-a1; do
+  dig @10.11.40.10 $n.orion.a1.test A +short
+done"	Каждое имя возвращает ожидаемый IPv4 адрес: sh-client 10.11.10.20, sz-client 10.11.20.20, files 10.11.30.10, id 10.11.40.10, web 10.11.40.20.
+A2.3	A2	0.25	Forward zone обслуживает AAAA-записи всех основных хостов	"Выполнить:
+for n in sh-client-a1 sz-client-a1 files-a1 id-a1 web-a1; do
+  dig @10.11.40.10 $n.orion.a1.test AAAA +short
+done"	Каждое имя возвращает ожидаемый IPv6 адрес из таблицы задания.
+A2.4	A2	0.25	DNS для multi-interface gateway-хостов однозначен и проверяем	"Выполнить:
+dig @10.11.40.10 sh-gw-a1.orion.a1.test A +short
+dig @10.11.40.10 sh-gw-wan-a1.orion.a1.test A +short
+dig @10.11.40.10 sz-gw-a1.orion.a1.test A +short
+dig @10.11.40.10 sz-gw-wan-a1.orion.a1.test A +short
+dig @10.11.40.10 sz-gw-files-a1.orion.a1.test A +short
+dig @10.11.40.10 sz-gw-srv-a1.orion.a1.test A +short"	Interface-specific names возвращают соответствующие адреса: 10.11.10.1, 198.51.100.10, 10.11.20.1, 198.51.100.20, 10.11.30.1, 10.11.40.1.
+A2.5	A2	0.5	IPv4 PTR-записи настроены для всех IPv4-адресов оцениваемых хостов	"Выполнить:
+for ip in 10.11.10.20 10.11.20.20 10.11.30.10 10.11.40.10 10.11.40.20 198.51.100.10 198.51.100.20; do
+  dig @10.11.40.10 -x $ip +short
+done"	Каждый IPv4 адрес возвращает ожидаемое имя. IPv6 PTR в A1 не оцениваются.
+A2.6	A2	0.5	CNAME-записи dns/ldap/ca/files/www настроены корректно	"Выполнить:
+for n in dns ldap ca files www; do
+  dig @10.11.40.10 $n.orion.a1.test CNAME +short
+done"	dns/ldap/ca указывают на id-a1.orion.a1.test.; files на files-a1.orion.a1.test.; www на web-a1.orion.a1.test.
+A2.7	A2	0.25	SRV-запись LDAP настроена корректно	"Выполнить:
+dig @10.11.40.10 _ldap._tcp.orion.a1.test SRV +short"	Вывод содержит: 0 100 389 id-a1.orion.a1.test.
+A2.8	A2	0.25	DNS-рекурсия разрешена внутренним сетям и запрещена WAN-сегменту как open resolver	"Позитивная проверка:
+ssh root@sz-client-a1 'dig @10.11.40.10 id-a1.orion.a1.test A +short'
+Негативная проверка с WAN-source:
+ssh root@sh-gw-a1 'dig @10.11.40.10 example.com A +time=2 +tries=1 -b 198.51.100.10 || true'"	Внутренние клиенты получают ответы. Запрос рекурсии с WAN-source не должен успешно рекурсивно разрешать внешние имена.
+A2.9	A2	0.25	Клиенты используют id-a1 как DNS resolver	"Выполнить:
+for h in sh-client-a1 sz-client-a1 files-a1 web-a1; do
+  ssh root@$h 'cat /etc/resolv.conf; getent hosts www.orion.a1.test'
+done"	resolv.conf или systemd-resolved указывает на id-a1/10.11.40.10. getent hosts www.orion.a1.test возвращает адрес web-a1.
+A2.10	A2	0.25	DNS-сервис и зоны сохраняются после reboot id-a1	"Перезагрузить id-a1. После восстановления:
+dig @10.11.40.10 www.orion.a1.test A +short
+dig @10.11.40.10 _ldap._tcp.orion.a1.test SRV +short"	После reboot BIND9 работает, forward и SRV records доступны.
+A3.1	A3	0.25	Root CA создан с требуемым именем и сохранён в evidence	"Выполнить:
+ssh root@sz-client-a1 'openssl x509 -in /opt/grading/a1/ca.pem -noout -subject -issuer'"	Subject/Issuer содержит Orion A1 Root CA. Файл /opt/grading/a1/ca.pem существует и читается.
+A3.2	A3	0.25	Root CA установлен как доверенный на клиентах и сервисных хостах	"Выполнить:
+for h in sz-client-a1 sh-client-a1 files-a1 web-a1; do
+  ssh root@$h 'grep -R ""Orion A1 Root CA"" /etc/ssl/certs 2>/dev/null | head -1 || update-ca-certificates -f >/tmp/ca_check.log 2>&1; true'
+done
+Функционально проверить TLS в последующих аспектах."	CA присутствует в trust store или TLS-подключения к web/LDAP проходят без отключения проверки сертификата.
+A3.3	A3	0.5	LDAP certificate содержит требуемые SAN	"Выполнить:
+ssh root@sz-client-a1 'openssl x509 -in /opt/grading/a1/id-a1.pem -noout -text | grep -A2 ""Subject Alternative Name""'"	SAN содержит DNS:id-a1.orion.a1.test, DNS:ldap.orion.a1.test и DNS:ca.orion.a1.test.
+A3.4	A3	0.5	Web certificate содержит требуемые SAN	"Выполнить:
+ssh root@sz-client-a1 'openssl x509 -in /opt/grading/a1/web-a1.pem -noout -text | grep -A2 ""Subject Alternative Name""'"	SAN содержит DNS:web-a1.orion.a1.test и DNS:www.orion.a1.test.
+A3.5	A3	0.5	LDAP StartTLS проверяется без отключения проверки сертификата	"Выполнить:
+ssh root@sz-client-a1 'LDAPTLS_CACERT=/opt/grading/a1/ca.pem ldapwhoami -H ldap://ldap.orion.a1.test -ZZ -x'
+ssh root@sh-client-a1 'ldapsearch -H ldap://ldap.orion.a1.test -ZZ -x -b dc=orion,dc=a1,dc=test -s base dn'"	StartTLS negotiation успешна. Сертификат доверяется. ldapwhoami возвращает anonymous или DN без TLS errors.
+A3.6	A3	0.25	HTTPS trust проверяется без -k с обоих клиентов	"Выполнить:
+ssh root@sz-client-a1 'curl -sS https://www.orion.a1.test/'
+ssh root@sh-client-a1 'curl -sS https://www.orion.a1.test/'"	Обе команды выполняются без -k/--insecure и возвращают A1_WEB_HTTPS_OK.
+A3.7	A3	0.25	Private keys защищены корректными правами	"Выполнить на id-a1 и web-a1:
+ssh root@id-a1 'find /etc -name ""*a1*key*"" -o -name ""*.key"" 2>/dev/null | xargs -r ls -l'
+ssh root@web-a1 'find /etc -name ""*a1*key*"" -o -name ""*.key"" 2>/dev/null | xargs -r ls -l'"	Private key files не доступны на чтение обычным пользователям. Обычно owner root, mode 600/640 или эквивалентно безопасно.
+A4.1	A4	0.25	OpenLDAP запущен и слушает 389/tcp	"Выполнить:
+ssh root@id-a1 'systemctl is-active slapd; ss -lntp | grep "":389""'"	slapd active/running, порт 389/tcp слушает на id-a1.
+A4.2	A4	0.25	Base DN и OU созданы корректно	"Выполнить:
+ldapsearch -H ldap://id-a1.orion.a1.test -ZZ -x -D 'cn=admin,dc=orion,dc=a1,dc=test' -w 'Skill39@A1' -b dc=orion,dc=a1,dc=test '(objectClass=organizationalUnit)' dn"	Найдены ou=People, ou=Groups, ou=Services под dc=orion,dc=a1,dc=test.
+A4.3	A4	0.25	LDAP-группы созданы с корректными gidNumber	"Выполнить:
+ldapsearch -H ldap://id-a1.orion.a1.test -ZZ -x -D 'cn=admin,dc=orion,dc=a1,dc=test' -w 'Skill39@A1' -b ou=Groups,dc=orion,dc=a1,dc=test '(cn=*)' cn gidNumber"	linuxadmins gidNumber=7100, developers gidNumber=7200, operators gidNumber=7300.
+A4.4	A4	0.25	LDAP-пользователи созданы с корректными uidNumber, primary group и shell	"Выполнить:
+ldapsearch -H ldap://id-a1.orion.a1.test -ZZ -x -D 'cn=admin,dc=orion,dc=a1,dc=test' -w 'Skill39@A1' -b ou=People,dc=orion,dc=a1,dc=test '(uid=*)' uid uidNumber gidNumber loginShell"	amina uidNumber=8101 gidNumber=7200; daryn uidNumber=8102 gidNumber=7300; timur uidNumber=8103 gidNumber=7100; loginShell=/bin/bash.
+A4.5	A4	0.25	Anonymous bind не раскрывает записи ou=People и userPassword	"Выполнить:
+ldapsearch -H ldap://id-a1.orion.a1.test -x -b ou=People,dc=orion,dc=a1,dc=test uid
+ldapsearch -H ldap://id-a1.orion.a1.test -x -b dc=orion,dc=a1,dc=test userPassword"	Anonymous bind может возвращать RootDSE/base metadata, но не возвращает записи ou=People и значения userPassword; допустимы Insufficient access или пустой результат.
+A4.6	A4	0.5	SSSD настроен и работает на sz-client-a1	"Выполнить:
+ssh root@sz-client-a1 'systemctl is-active sssd; getent passwd amina daryn timur; getent group developers operators linuxadmins'"	sssd active. getent возвращает LDAP-пользователей и группы.
+A4.7	A4	0.5	SSSD настроен и работает на sh-client-a1	"Выполнить:
+ssh root@sh-client-a1 'systemctl is-active sssd; getent passwd amina daryn timur; getent group developers operators linuxadmins'"	sssd active. getent возвращает LDAP-пользователей и группы.
+A4.8	A4	0.5	SSSD настроен и работает на files-a1 для файловых сервисов	"Выполнить:
+ssh root@files-a1 'systemctl is-active sssd; getent passwd amina daryn timur; getent group developers operators linuxadmins'"	files-a1 разрешает LDAP-пользователей/группы через NSS/SSSD, что необходимо для NFS/Samba access model.
+A4.9	A4	0.25	Фактическая group membership пользователей корректна на SSSD-клиентах	"Выполнить:
+for h in sz-client-a1 sh-client-a1 files-a1; do
+  ssh root@$h 'id amina; id daryn; id timur'
+done"	amina состоит в developers; daryn состоит в operators; timur состоит в linuxadmins. UID/GID совпадают с LDAP.
+A4.10	A4	0.5	LDAP login и auto-create home работают на клиентах	"Выполнить:
+ssh amina@sz-client-a1 'id; pwd; test -d $HOME && echo HOME_OK'
+ssh daryn@sh-client-a1 'id; pwd; test -d $HOME && echo HOME_OK'"	Вход по паролю Skill39@A1 успешен. Домашние каталоги существуют/создаются автоматически. Вывод содержит HOME_OK.
+A4.11	A4	0.25	timur имеет sudo-доступ на sz-client-a1	"Выполнить:
+ssh timur@sz-client-a1 'sudo -n id || sudo -S id'"	Команда sudo выполняется для timur и возвращает uid=0/root. Если требуется пароль, используется Skill39@A1.
+A4.12	A4	0.25	LDAP/SSSD сохраняют работоспособность после reboot	"Перезагрузить id-a1, sz-client-a1, sh-client-a1, files-a1.
+После восстановления выполнить:
+ssh root@sz-client-a1 'getent passwd amina; id timur'
+ssh root@sh-client-a1 'getent passwd daryn'
+ssh root@files-a1 'getent group developers'"	После reboot LDAP/StartTLS и SSSD-клиенты работают без ручного восстановления.
+A5.1	A5	0.5	HTTP service на web-a1 возвращает A1_WEB_HTTP_OK	"Выполнить:
+ssh root@sz-client-a1 'curl -s http://www.orion.a1.test/' 
+ssh root@sh-client-a1 'curl -s http://www.orion.a1.test/'"	Обе команды возвращают A1_WEB_HTTP_OK.
+A5.2	A5	0.75	HTTPS service на web-a1 возвращает A1_WEB_HTTPS_OK без отключения проверки TLS	"Выполнить:
+ssh root@sz-client-a1 'curl -sS https://www.orion.a1.test/'
+ssh root@sh-client-a1 'curl -sS https://www.orion.a1.test/'"	Обе команды возвращают A1_WEB_HTTPS_OK без использования -k/--insecure.
+A5.3	A5	0.5	HTTP и HTTPS /healthz оба возвращают OK	"Выполнить:
+ssh root@sz-client-a1 'curl -s http://www.orion.a1.test/healthz; curl -sS https://www.orion.a1.test/healthz'
+ssh root@sh-client-a1 'curl -s http://www.orion.a1.test/healthz; curl -sS https://www.orion.a1.test/healthz'"	Все четыре проверки возвращают ровно OK.
+A5.4	A5	0.25	Web доступен по FQDN и по IP; DNS-зависимость классифицируется отдельно	"Проверить FQDN:
+curl -s http://www.orion.a1.test/
+Если не работает, проверить по IP:
+curl -s http://10.11.40.20/
+curl -sS --resolve www.orion.a1.test:443:10.11.40.20 https://www.orion.a1.test/"	FQDN-доступ работает. Если по IP работает, а по FQDN нет, фиксировать primary failure в DNS, но web service считать функционально работающим только для диагностического комментария.
+A5.5	A5	0.25	Web service отправляет журналы на central syslog	"Сгенерировать запрос:
+ssh root@sz-client-a1 'curl -s http://www.orion.a1.test/healthz >/dev/null'
+Проверить:
+ssh root@id-a1 'grep -R ""web-a1\|A1_WEB\|healthz"" /var/log/remote 2>/dev/null | tail'"	На id-a1 в remote logs видны события web-a1 или access/error log события после запроса.
+A5.6	A5	0.25	Web service сохраняет работоспособность после reboot web-a1	"Перезагрузить web-a1. После восстановления:
+curl -s http://www.orion.a1.test/
+curl -sS https://www.orion.a1.test/healthz"	После reboot HTTP/HTTPS работают без ручного запуска.
+A6.1	A6	0.25	Файловая система и права на files-a1 используют LDAP-группы developers/operators	"Выполнить:
+ssh root@files-a1 'ls -ld /srv/nfs/projects /srv/samba/projects; getfacl /srv/nfs/projects /srv/samba/projects 2>/dev/null || true'"	Пути существуют. Ownership/permissions/ACL используют системные LDAP-группы developers/operators или эквивалентную модель, обеспечивающую требования доступа.
+A6.2	A6	0.25	NFSv4 export /srv/nfs/projects доступен через TCP/2049	"Выполнить:
+ssh root@files-a1 'exportfs -v; ss -lntp | grep "":2049""'
+ssh root@sz-client-a1 'nc -vz files.orion.a1.test 2049'"	Export опубликован. NFSv4 доступен по TCP/2049. NFSv3/rpcbind/mountd не требуются и не оцениваются.
+A6.3	A6	0.5	sz-client-a1 persistently монтирует NFS в /mnt/projects	"Выполнить:
+ssh root@sz-client-a1 'findmnt /mnt/projects; cat /mnt/projects/a1-nfs-ok.txt'"	/mnt/projects смонтирован. Файл a1-nfs-ok.txt читается и содержит A1_NFS_OK.
+A6.4	A6	0.5	sh-client-a1 монтирует NFS через autofs в /net/projects	"Выполнить:
+ssh root@sh-client-a1 'systemctl is-active autofs; ls /net/projects; cat /net/projects/a1-nfs-ok.txt'"	autofs active. При обращении /net/projects монтируется NFS export. Файл содержит A1_NFS_OK.
+A6.5	A6	0.25	Root squash для NFS включён и эффективен	"Выполнить:
+ssh root@sh-client-a1 'touch /net/projects/root-squash-test.txt 2>/tmp/a1err || true; ls -l /net/projects/root-squash-test.txt 2>/dev/null || cat /tmp/a1err'
+ssh root@files-a1 'ls -l /srv/nfs/projects/root-squash-test.txt 2>/dev/null || true'"	Root с клиента не получает root-владение на сервере. Файл либо не создаётся, либо принадлежит nobody/nogroup или anonuid/anongid, но не root:root.
+A6.6	A6	0.25	Samba share projects виден только authenticated users, guest запрещён	"Выполнить:
+smbclient -L //files.orion.a1.test -N || true
+smbclient //files.orion.a1.test/projects -N -c 'ls' || true
+smbclient -L //files.orion.a1.test -U amina%Skill39@A1"	Guest-доступ к projects запрещён. Authenticated listing для amina успешен.
+A6.7	A6	0.25	Samba: amina может читать и записывать	"Выполнить:
+ssh root@sz-client-a1 'echo A1_SAMBA_AMINA > /tmp/amina.txt'
+smbclient //files.orion.a1.test/projects -U amina%Skill39@A1 -c 'put /tmp/amina.txt amina.txt; get amina.txt /tmp/amina-read.txt'
+ssh root@sz-client-a1 'cat /tmp/amina-read.txt'"	Файл успешно загружен и прочитан. Содержимое A1_SAMBA_AMINA.
+A6.8	A6	0.25	Samba: daryn может читать, но не может записывать	"Выполнить:
+smbclient //files.orion.a1.test/projects -U daryn%Skill39@A1 -c 'ls'
+ssh root@sz-client-a1 'echo A1_DARYN_FAIL > /tmp/daryn.txt'
+smbclient //files.orion.a1.test/projects -U daryn%Skill39@A1 -c 'put /tmp/daryn.txt daryn-should-fail.txt' || true"	daryn listing/read успешен. Попытка put завершается отказом доступа.
+A6.9	A6	0.5	NFS/Samba сохраняют работоспособность после reboot files-a1 и клиентов	"Перезагрузить files-a1, sz-client-a1, sh-client-a1.
+После восстановления:
+ssh root@sz-client-a1 'findmnt /mnt/projects; cat /mnt/projects/a1-nfs-ok.txt'
+ssh root@sh-client-a1 'ls /net/projects && cat /net/projects/a1-nfs-ok.txt'
+smbclient //files.orion.a1.test/projects -U amina%Skill39@A1 -c 'ls'"	После reboot NFS persistent mount, autofs и Samba share работают без ручной настройки.
+A7.1	A7	0.25	nftables active на sh-gw-a1 и sz-gw-a1	"Выполнить:
+ssh root@sh-gw-a1 'systemctl is-active nftables; nft list ruleset'
+ssh root@sz-gw-a1 'systemctl is-active nftables; nft list ruleset'"	nftables active. Ruleset присутствует на обоих gateway.
+A7.2	A7	0.25	SSH к sh-gw-a1 разрешён только из SH-LAN	"Позитив:
+ssh root@sh-client-a1 'ssh -o BatchMode=yes root@10.11.10.1 hostname'
+Негатив:
+ssh root@sz-client-a1 'nc -vz 10.11.10.1 22 || true'"	SSH с sh-client к sh-gw работает. SSH к sh-gw с Shenzhen-клиента запрещён/недоступен.
+A7.3	A7	0.25	SSH к sz-gw-a1 разрешён только из SZ-CLIENT	"Позитив:
+ssh root@sz-client-a1 'ssh -o BatchMode=yes root@10.11.20.1 hostname'
+Негатив:
+ssh root@sh-client-a1 'nc -vz 10.11.20.1 22 || true'"	SSH с sz-client к sz-gw работает. SSH к sz-gw из Shanghai-клиента запрещён/недоступен.
+A7.4	A7	0.25	Разрешены требуемые SH-LAN → id-a1 потоки DNS и LDAP StartTLS	"Выполнить:
+ssh root@sh-client-a1 'dig @10.11.40.10 www.orion.a1.test A +short'
+ssh root@sh-client-a1 'nc -vz id-a1.orion.a1.test 389'
+ssh root@sh-client-a1 'ldapsearch -H ldap://ldap.orion.a1.test -ZZ -x -b dc=orion,dc=a1,dc=test -s base dn'"	DNS и LDAP StartTLS из Shanghai к id-a1 доступны и работают.
+A7.5	A7	0.25	Разрешены требуемые SH-LAN → web-a1 HTTP/HTTPS потоки	"Выполнить:
+ssh root@sh-client-a1 'curl -s http://www.orion.a1.test/'
+ssh root@sh-client-a1 'curl -sS https://www.orion.a1.test/'"	Из Shanghai web HTTP/HTTPS доступны и возвращают A1_WEB_HTTP_OK / A1_WEB_HTTPS_OK.
+A7.6	A7	0.5	Разрешён SH-LAN → files-a1 NFSv4 TCP/2049, но Samba из SH-LAN запрещена	"Позитив:
+ssh root@sh-client-a1 'nc -vz files.orion.a1.test 2049; ls /net/projects'
+Негатив:
+ssh root@sh-client-a1 'nc -vz files.orion.a1.test 445 || true'
+ssh root@sh-client-a1 'nc -vz files.orion.a1.test 139 || true'"	NFSv4 доступен из SH-LAN. Samba ports 445/139 из SH-LAN запрещены.
+A7.7	A7	0.25	Разрешены требуемые SZ-CLIENT → id/web/files потоки	"Выполнить:
+ssh root@sz-client-a1 'dig @10.11.40.10 www.orion.a1.test A +short'
+ssh root@sz-client-a1 'curl -sS https://www.orion.a1.test/'
+ssh root@sz-client-a1 'nc -vz files.orion.a1.test 2049'
+ssh root@sz-client-a1 'nc -vz files.orion.a1.test 445'"	Сервисные потоки из SZ-CLIENT к id/web/files доступны согласно заданию.
+A7.8	A7	0.25	WAN-source direct access к внутренним сервисам блокируется	"С sh-gw-a1 с source WAN IP выполнить:
+ssh root@sh-gw-a1 'nc -s 198.51.100.10 -vz 10.11.40.10 389 || true'
+ssh root@sh-gw-a1 'nc -s 198.51.100.10 -vz 10.11.40.20 443 || true'
+ssh root@sh-gw-a1 'nc -s 198.51.100.10 -vz 10.11.30.10 445 || true'"	Прямые подключения с source IP WAN-сегмента к внутренним сервисам блокируются. Разрешён только routed traffic от внутренних сетей по traffic matrix.
+A7.9	A7	0.25	Syslog-потоки к id-a1 разрешены через firewall	"Сгенерировать log event:
+ssh root@sh-gw-a1 'logger A1_SYSLOG_SH_GW_TEST'
+ssh root@sz-gw-a1 'logger A1_SYSLOG_SZ_GW_TEST'
+Проверить:
+ssh root@id-a1 'grep -R ""A1_SYSLOG_SH_GW_TEST\|A1_SYSLOG_SZ_GW_TEST"" /var/log/remote 2>/dev/null | tail'"	События с обоих gateway попадают на id-a1. Firewall не блокирует выбранный syslog transport.
+A7.10	A7	0.25	Drop logging работает с требуемыми prefix	"Сгенерировать запрещённые подключения, затем выполнить:
+ssh root@sh-gw-a1 'journalctl -k | grep A1-SH-DROP | tail || true'
+ssh root@sz-gw-a1 'journalctl -k | grep A1-SZ-DROP | tail || true'"	В kernel/journal logs видны drop-события с prefix A1-SH-DROP и A1-SZ-DROP.
+A7.11	A7	0.25	Firewall rules сохраняются после reboot gateway-серверов	"Перезагрузить sh-gw-a1 и sz-gw-a1. После восстановления:
+ssh root@sh-gw-a1 'systemctl is-active nftables; nft list ruleset'
+ssh root@sz-gw-a1 'systemctl is-active nftables; nft list ruleset'
+ssh root@sh-client-a1 'curl -s http://www.orion.a1.test/'"	nftables active после reboot. Разрешённые сервисные потоки продолжают работать.
+A8.1	A8	0.25	id-a1 работает как central syslog receiver	"Выполнить:
+ssh root@id-a1 'systemctl is-active rsyslog; ss -lunp | grep 514 || ss -lntp | grep 514 || true'"	rsyslog active. id-a1 слушает выбранный syslog transport UDP/514 или TCP/514 либо иным образом принимает remote logs.
+A8.2	A8	0.25	Файл syslog-transport.txt создан и не конфликтует с notes.txt	"Выполнить:
+ssh root@sz-client-a1 'cat /opt/grading/a1/syslog-transport.txt'
+ssh root@sz-client-a1 'cat /opt/grading/a1/notes.txt'"	syslog-transport.txt содержит udp/514 или tcp/514. notes.txt содержит incomplete=none/none или список невыполненных частей без обязательного смешивания с transport.
+A8.3	A8	0.5	Remote logs принимаются от всех требуемых хостов и разделены по hostname	"Сгенерировать:
+for h in sh-gw-a1 sz-gw-a1 web-a1 files-a1 sz-client-a1 sh-client-a1; do ssh root@$h ""logger A1_LOG_TEST_$h""; done
+Проверить:
+ssh root@id-a1 'find /var/log/remote -type f -maxdepth 3 2>/dev/null | sort'
+ssh root@id-a1 'grep -R ""A1_LOG_TEST"" /var/log/remote 2>/dev/null'"	Есть remote log структура по hostname или эквивалентное разделение. Видны события от всех требуемых хостов.
+A8.4	A8	0.25	В central logs видны события nftables drop	"Выполнить запрещённые подключения из A7, затем:
+ssh root@id-a1 'grep -R ""A1-SH-DROP\|A1-SZ-DROP"" /var/log/remote 2>/dev/null | tail'"	На id-a1 в remote logs видны drop events с prefix A1-SH-DROP/A1-SZ-DROP.
+A8.5	A8	0.5	В central logs видны web, file service и auth-related события	"Сгенерировать web/NFS/Samba/login действия, затем:
+ssh root@id-a1 'grep -R ""web-a1\|nginx\|apache\|files-a1\|smbd\|nfs\|sssd\|slapd"" /var/log/remote 2>/dev/null | tail -50'"	В remote logs видны события web-a1, files-a1 и auth/LDAP/SSSD-related события.
+A8.6	A8	0.5	Evidence directory содержит обязательные файлы	"Выполнить:
+ssh root@sz-client-a1 'ls -ld /opt/grading/a1; ls -l /opt/grading/a1/checks.txt /opt/grading/a1/notes.txt /opt/grading/a1/ca.pem /opt/grading/a1/id-a1.pem /opt/grading/a1/web-a1.pem /opt/grading/a1/syslog-transport.txt'"	/opt/grading/a1 существует. Обязательные evidence-файлы присутствуют и не пустые.
+A8.7	A8	0.5	a1-selfcheck.sh создан, исполняемый и запускается без интерактивного ввода	"Выполнить:
+ssh root@sz-client-a1 'test -x /opt/a1-checks/a1-selfcheck.sh && timeout 120 /opt/a1-checks/a1-selfcheck.sh; echo EXIT:$?'"	Скрипт исполняемый, завершается за разумное время без ввода с клавиатуры, exit code 0 или документированный ненулевой при FAIL-checks.
+A8.8	A8	0.5	checks.txt содержит команды, выводы и PASS/FAIL по всем основным блокам	"Выполнить:
+ssh root@sz-client-a1 'grep -E ""DNS|LDAP|SSSD|HTTP|HTTPS|NFS|Samba|nftables|routing|central logs|PASS|FAIL|Command:|Expected:|Actual:"" /opt/grading/a1/checks.txt | head -80'"	checks.txt содержит структурированные проверки: команда, ожидаемый результат, фактический результат, PASS/FAIL по routing, DNS, LDAP/StartTLS, SSSD, web, NFS, Samba, nftables, central logs.
+A8.9	A8	0.25	notes.txt заполнен корректно	"Выполнить:
+ssh root@sz-client-a1 'cat /opt/grading/a1/notes.txt'"	Если всё выполнено: none или incomplete=none. Если есть невыполненные части — они кратко перечислены. Файл не пустой.
+A8.10	A8	0.25	Root SSH key для оценочной команды сохранён на всех VM	"Выполнить с evaluator host или sz-client-a1:
+for h in sh-gw-a1 sh-client-a1 sz-gw-a1 sz-client-a1 files-a1 id-a1 web-a1; do
+  ssh -o BatchMode=yes root@$h hostname
+done"	SSH root key-based login работает без запроса пароля на всех VM.
+A8.11	A8	0.25	Critical end-to-end services сохраняются после reboot	"Перезагрузить все VM. После восстановления выполнить smoke test:
+ssh root@sh-client-a1 'dig @10.11.40.10 www.orion.a1.test A +short; curl -sS https://www.orion.a1.test/healthz; getent passwd amina; ls /net/projects'
+ssh root@sz-client-a1 'getent passwd daryn; findmnt /mnt/projects; smbclient -L //files.orion.a1.test -U amina%Skill39@A1'"	После reboot работают DNS, LDAP/SSSD, HTTPS, NFS, Samba и cross-site routing без ручного восстановления.

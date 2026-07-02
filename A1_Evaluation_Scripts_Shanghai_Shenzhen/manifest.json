@@ -1,0 +1,9 @@
+{
+  "name": "A1_Evaluation_Scripts_Shanghai_Shenzhen",
+  "recommended_remote_launch_host": "sz-client-a1",
+  "remote_script": "remote/a1-evaluate-remote.sh",
+  "local_script": "local/a1-local-check.sh",
+  "criteria_count": 75,
+  "total_marks": 25.0,
+  "generated_from": "A1_Marking_Scheme_Shanghai_Shenzhen_Revised_HowToMark_v2_RU.xlsx"
+}
