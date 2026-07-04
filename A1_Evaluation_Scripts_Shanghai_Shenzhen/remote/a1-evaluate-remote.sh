@@ -631,9 +631,12 @@ check_A6() {
   fi
 
   if should_run_criterion "A6.6"; then
-    out="$(ssh_cmd sz-client-a1 "smbclient -L //files.${A1_DOMAIN} -N 2>&1 || true; smbclient -L //files.${A1_DOMAIN} -U 'amina%${A1_PASS}' 2>&1")"
+    out="$(ssh_cmd sz-client-a1 "echo '--- guest list ---'; smbclient -L //files.${A1_DOMAIN} -N 2>&1 || true; echo '--- guest projects ---'; smbclient //files.${A1_DOMAIN}/projects -N -c 'ls' 2>&1 || true; echo '--- amina list ---'; smbclient -L //files.${A1_DOMAIN} -U 'amina%${A1_PASS}' 2>&1")"
     show_output "$out"
-    if echo "$out" | grep -q "projects" && echo "$out" | grep -Eiq "NT_STATUS_ACCESS_DENIED|session setup failed"; then pass "A6.6" "0.25" "Samba share visible to authenticated users, guest denied"; else fail "A6.6" "0.25" "Samba guest/auth visibility wrong"; fi
+    guest_list="$(printf "%s\n" "$out" | awk '/^--- guest list ---/{capture=1; next} /^--- guest projects ---/{capture=0} capture{print}')"
+    guest_projects="$(printf "%s\n" "$out" | awk '/^--- guest projects ---/{capture=1; next} /^--- amina list ---/{capture=0} capture{print}')"
+    amina_list="$(printf "%s\n" "$out" | awk '/^--- amina list ---/{capture=1; next} capture{print}')"
+    if ! echo "$guest_list" | grep -q "projects" && echo "$guest_projects" | grep -Eiq "NT_STATUS_ACCESS_DENIED|session setup failed|tree connect failed|LOGON_FAILURE|BAD_NETWORK_NAME|denied" && echo "$amina_list" | grep -q "projects"; then pass "A6.6" "0.25" "Samba share visible to authenticated users, guest denied"; else fail "A6.6" "0.25" "Samba guest/auth visibility wrong"; fi
   fi
 
   if should_run_criterion "A6.7"; then
