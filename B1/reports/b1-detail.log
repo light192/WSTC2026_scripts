@@ -1,0 +1,30 @@
+﻿
+
+=== B1.1 - base addressing, hostname, routing, simulated Internet ===
+Шаг: B1.1 - base addressing, hostname, routing, simulated Internet
+Команда: hostname
+[MANUAL] B1.1
+Verify hostname and network settings on sha-cl01. Use hostname and Get-NetIPConfiguration.
+[MANUAL] B1.1
+Verify hostname and network settings on sha-web01. Use hostname and Get-NetIPConfiguration.
+[MANUAL] B1.1
+Verify hostname and network settings on bj-cl01. Use hostname and Get-NetIPConfiguration.
+[MANUAL] B1.1
+Verify hostname and network settings on bj-rtr01. Use hostname and Get-NetIPConfiguration.
+[MANUAL] B1.1
+Verify hostname and network settings on sha-fs01. Use hostname and Get-NetIPConfiguration.
+[MANUAL] B1.1
+Verify hostname and network settings on sha-dc01. Use hostname and Get-NetIPConfiguration.
+[MANUAL] B1.1
+Verify hostname and network settings on bj-dc02. Use hostname and Get-NetIPConfiguration.
+[MANUAL] B1.1
+Verify hostname and network settings on sha-app01. Use hostname and Get-NetIPConfiguration.
+[MANUAL] B1.1
+Verify hostname and network settings on bj-srv01. Use hostname and Get-NetIPConfiguration.
+[MANUAL] B1.1
+Verify hostname and network settings on sha-rtr01. Use hostname and Get-NetIPConfiguration.
+[MANUAL] B1.1
+Check IP configuration, default gateway, DNS client settings and route tables on the routers and clients. Confirm that the simulated Internet node 198.18.100.10 is reachable from both sites.
+[CRITERION] B1.1 - Ð‘Ð°Ð·Ð¾Ð²Ð°Ñ Ð°Ð´Ñ€ÐµÑÐ°Ñ†Ð¸Ñ, hostname, routing, simulated Internet/transit
+[COMMANDS] hostname; Get-NetIPConfiguration; Test-NetConnection 198.18.100.10
+[EXPECTED] Hostnames match the topology; core IP settings exist; simulated Internet node reachable.

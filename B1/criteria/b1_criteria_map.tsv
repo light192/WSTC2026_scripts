@@ -1,0 +1,9 @@
+CriterionID	MaxMark	Description	VerificationCommands	ExpectedResult
+B1.1	3.0	Базовая адресация, hostname, routing, simulated Internet/transit	hostname; Get-NetIPConfiguration; Test-NetConnection 198.18.100.10	Hostnames match the topology; core IP settings exist; simulated Internet node reachable.
+B1.2	5.0	AD DS, additional DC, AD Sites, replication	Get-ADDomain; Get-ADForest; Get-ADDomainController; repadmin /replsummary	Forest/domain exist; second DC present; sites and replication healthy.
+B1.3	3.0	DNS forward/reverse records, PTR, DNS forwarding	Get-DnsServerZone; Get-DnsServerResourceRecord; Get-DnsServerForwarder	Primary zones and reverse zones exist; PTRs and forwarders are configured.
+B1.4	3.0	DHCP scopes, relay, dynamic DNS, client leases	Get-DhcpServerv4Scope; Get-DhcpServerv4Lease; Get-DhcpServerv4Failover	Scopes are created; relay configured; clients receive leases from the correct scope.
+B1.5	3.0	OU, groups, users, PowerShell automation	Get-ADOrganizationalUnit; Get-ADGroup; Get-ADUser; Test-Path C:\Skills\Import-B1Users.ps1	Required OUs/groups/users exist; automation script and CSV are present.
+B1.6	3.0	GPO baseline, Windows LAPS, minimal BitLocker recovery	Get-GPO -All; Get-ADComputer; Get-LapsADPassword; Get-BitLockerVolume	Required GPOs exist; LAPS and BitLocker recovery backup are configured.
+B1.7	3.0	File services, NTFS, drive mapping	Get-SmbShare; Get-Acl; Test-Path \\files.nb-b1.local\Common	Shares and NTFS permissions match the task; drive mappings are available.
+B1.8	2.0	Client validation, Git, final self-check	Get-ComputerInfo; git -C C:\Skills log --oneline -1; Test-Path C:\Skills\B1-selfcheck.txt	Clients are domain-joined; Git repository and self-check file exist.
