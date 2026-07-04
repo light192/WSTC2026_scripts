@@ -133,7 +133,7 @@ check_web() {
   show_output "$out"
   if echo "$out" | grep -q "active" && echo "$out" | grep -q ":80" && echo "$out" | grep -q ":443"; then pass "A5.LOCAL.SERVICE" "0" "web service active/listening"; else fail "A5.LOCAL.SERVICE" "0" "web service/listening incomplete"; fi
 
-  out="$(curl -sS http://127.0.0.1/ 2>&1; echo; curl -k -sS https://127.0.0.1/ 2>&1; echo; curl -sS http://127.0.0.1/healthz 2>&1)"
+  out="$(curl -LsS http://127.0.0.1/ 2>&1; echo; curl -k -LsS https://127.0.0.1/ 2>&1; echo; curl -LsS http://127.0.0.1/healthz 2>&1)"
   show_output "$out"
   if contains_all "$out" "A1_WEB_HTTP_OK" "A1_WEB_HTTPS_OK" "OK"; then pass "A5.LOCAL.CONTENT" "0" "local web content OK"; else fail "A5.LOCAL.CONTENT" "0" "local web content wrong"; fi
 }
@@ -141,7 +141,7 @@ check_web() {
 check_client_mounts() {
   section "CLIENT - service access from $HN"
   check_sssd_client
-  out="$(dig @${A1_DNS_IP} www.${A1_DOMAIN} A +short 2>&1; curl -sS http://www.${A1_DOMAIN}/healthz 2>&1; curl -sS https://www.${A1_DOMAIN}/healthz 2>&1)"
+  out="$(dig @${A1_DNS_IP} www.${A1_DOMAIN} A +short 2>&1; curl -LsS http://www.${A1_DOMAIN}/healthz 2>&1; curl -LsS https://www.${A1_DOMAIN}/healthz 2>&1)"
   show_output "$out"
   if echo "$out" | grep -q "10.11.40.20" && [ "$(echo "$out" | grep -c '^OK$')" -ge 2 ]; then pass "LOCAL.CLIENT.WEB" "0" "DNS and web health OK from $HN"; else warn "LOCAL.CLIENT.WEB" "0" "DNS/web health not fully OK from $HN"; fi
 

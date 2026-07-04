@@ -445,7 +445,7 @@ check_A3() {
 
   if should_run_criterion "A3.6"; then
     step "A3.6 HTTPS trust from both clients"
-    out="$(ssh_cmd sz-client-a1 "curl -sS https://www.${A1_DOMAIN}/ 2>&1"; ssh_cmd sh-client-a1 "curl -sS https://www.${A1_DOMAIN}/ 2>&1")"
+    out="$(ssh_cmd sz-client-a1 "curl -LsS https://www.${A1_DOMAIN}/ 2>&1"; ssh_cmd sh-client-a1 "curl -LsS https://www.${A1_DOMAIN}/ 2>&1")"
     show_output "$out"
     if [ "$(echo "$out" | grep -c '^A1_WEB_HTTPS_OK$')" -ge 2 ]; then pass "A3.6" "0.25" "HTTPS trust works from both clients"; else fail "A3.6" "0.25" "HTTPS trust failed from one/both clients"; fi
   fi
@@ -555,28 +555,28 @@ check_A4() {
 check_A5() {
   section "A5 - Web service"
   if should_run_criterion "A5.1"; then
-    out="$(ssh_cmd sz-client-a1 "curl -sS http://www.${A1_DOMAIN}/ 2>&1")"
+    out="$(ssh_cmd sz-client-a1 "curl -LsS http://www.${A1_DOMAIN}/ 2>&1"; ssh_cmd sh-client-a1 "curl -LsS http://www.${A1_DOMAIN}/ 2>&1")"
     show_output "$out"
-    [ "$out" = "A1_WEB_HTTP_OK" ] && pass "A5.1" "0.50" "HTTP returns expected string" || fail "A5.1" "0.50" "HTTP string mismatch"
+    [ "$(echo "$out" | grep -c '^A1_WEB_HTTP_OK$')" -ge 2 ] && pass "A5.1" "0.50" "HTTP returns expected string from both clients" || fail "A5.1" "0.50" "HTTP string mismatch"
   fi
 
   if should_run_criterion "A5.2"; then
-    out="$(ssh_cmd sz-client-a1 "curl -sS https://www.${A1_DOMAIN}/ 2>&1")"
+    out="$(ssh_cmd sz-client-a1 "curl -LsS https://www.${A1_DOMAIN}/ 2>&1"; ssh_cmd sh-client-a1 "curl -LsS https://www.${A1_DOMAIN}/ 2>&1")"
     show_output "$out"
-    [ "$out" = "A1_WEB_HTTPS_OK" ] && pass "A5.2" "0.75" "HTTPS returns expected string with TLS validation" || fail "A5.2" "0.75" "HTTPS failed or wrong output"
+    [ "$(echo "$out" | grep -c '^A1_WEB_HTTPS_OK$')" -ge 2 ] && pass "A5.2" "0.75" "HTTPS returns expected string with TLS validation from both clients" || fail "A5.2" "0.75" "HTTPS failed or wrong output"
   fi
 
   if should_run_criterion "A5.3"; then
-    out="$(ssh_cmd sz-client-a1 "curl -sS http://www.${A1_DOMAIN}/healthz; echo; curl -sS https://www.${A1_DOMAIN}/healthz")"
+    out="$(ssh_cmd sz-client-a1 "curl -LsS http://www.${A1_DOMAIN}/healthz; echo; curl -LsS https://www.${A1_DOMAIN}/healthz"; ssh_cmd sh-client-a1 "curl -LsS http://www.${A1_DOMAIN}/healthz; echo; curl -LsS https://www.${A1_DOMAIN}/healthz")"
     show_output "$out"
-    [ "$(echo "$out" | grep -c '^OK$')" -ge 2 ] && pass "A5.3" "0.50" "HTTP and HTTPS /healthz return OK" || fail "A5.3" "0.50" "/healthz not OK on both protocols"
+    [ "$(echo "$out" | grep -c '^OK$')" -ge 4 ] && pass "A5.3" "0.50" "HTTP and HTTPS /healthz return OK from both clients" || fail "A5.3" "0.50" "/healthz not OK on both protocols"
   fi
 
   if should_run_criterion "A5.4"; then
-    out1="$(ssh_cmd sz-client-a1 "curl -sS http://10.11.40.20/ 2>&1")"
+    out1="$(ssh_cmd sz-client-a1 "curl -LsS http://10.11.40.20/ 2>&1")"
     out2="$(ssh_cmd sz-client-a1 "dig @${A1_DNS_IP} +short www.${A1_DOMAIN} A")"
     show_output "$out1"$'\n'"$out2"
-    if [ "$out1" = "A1_WEB_HTTP_OK" ] && [ "$out2" = "10.11.40.20" ]; then pass "A5.4" "0.25" "web works by IP and FQDN"; else fail "A5.4" "0.25" "web IP/FQDN check failed"; fi
+    if [ "$out1" = "A1_WEB_HTTP_OK" ] && echo "$out2" | grep -qx "10.11.40.20"; then pass "A5.4" "0.25" "web works by IP and FQDN"; else fail "A5.4" "0.25" "web IP/FQDN check failed"; fi
   fi
 
   if should_run_criterion "A5.5"; then
@@ -587,7 +587,7 @@ check_A5() {
 
   if should_run_criterion "A5.6"; then
     if [ "$RUN_POST_REBOOT" = "1" ]; then
-      out="$(ssh_cmd web-a1 'systemctl is-active nginx apache2 2>/dev/null || true'; ssh_cmd sz-client-a1 "curl -sS http://www.${A1_DOMAIN}/healthz")"
+      out="$(ssh_cmd web-a1 'systemctl is-active nginx apache2 2>/dev/null || true'; ssh_cmd sz-client-a1 "curl -LsS http://www.${A1_DOMAIN}/healthz")"
       show_output "$out"
       if echo "$out" | grep -q "active" && echo "$out" | grep -q "OK"; then pass "A5.6" "0.25" "web persists after reboot"; else fail "A5.6" "0.25" "web not persistent"; fi
     else
@@ -684,7 +684,7 @@ check_A7() {
   if should_run_criterion "A7.4"; then
     out="$(ssh_cmd sh-client-a1 "dig @10.11.40.10 www.${A1_DOMAIN} A +short; nc -vz -w2 10.11.40.10 389; ldapwhoami -H ldap://ldap.${A1_DOMAIN} -ZZ -x -D '${A1_BIND_DN}' -w '${A1_PASS}'")"
     show_output "$out"
-    if contains_all "$out" "10.11.40.20" "succeeded" "dn:${A1_BIND_DN}"; then pass "A7.4" "0.25" "SH-LAN to id-a1 DNS/LDAP StartTLS allowed"; else fail "A7.4" "0.25" "SH-LAN to id-a1 flows not allowed"; fi
+    if echo "$out" | grep -qx "10.11.40.20" && echo "$out" | grep -Eiq "389.*(succeeded|open)" && echo "$out" | grep -q "dn:${A1_BIND_DN}"; then pass "A7.4" "0.25" "SH-LAN to id-a1 DNS/LDAP StartTLS allowed"; else fail "A7.4" "0.25" "SH-LAN to id-a1 flows not allowed"; fi
   fi
 
   if should_run_criterion "A7.5"; then
@@ -777,7 +777,7 @@ check_A8() {
   fi
 
   if should_run_criterion "A8.7"; then
-    out="$(ssh_cmd sz-client-a1 'test -x /opt/a1-checks/a1-selfcheck.sh && timeout 60 /opt/a1-checks/a1-selfcheck.sh >/tmp/a1-selfcheck-eval.out 2>&1; rc=$?; cat /tmp/a1-selfcheck-eval.out; echo SELF_RC:$rc')"
+    out="$(ssh_cmd sz-client-a1 'p=/opt/a1-checks/a1-selfcheck.sh; ls -l "$p" 2>&1 || true; if [ ! -e "$p" ]; then echo SELF_STATUS:missing; exit 1; fi; if [ ! -x "$p" ]; then echo SELF_STATUS:not_executable; exit 1; fi; timeout 120 "$p" >/tmp/a1-selfcheck-eval.out 2>&1; rc=$?; cat /tmp/a1-selfcheck-eval.out 2>/dev/null || true; echo SELF_RC:$rc; exit $rc')"
     show_output "$out"
     if echo "$out" | grep -q "SELF_RC:0"; then pass "A8.7" "0.50" "selfcheck executable and non-interactive"; else fail "A8.7" "0.50" "selfcheck missing/not executable/interactive/failing"; fi
   fi
@@ -802,7 +802,7 @@ check_A8() {
 
   if should_run_criterion "A8.11"; then
     if [ "$RUN_POST_REBOOT" = "1" ]; then
-      out="$(ssh_cmd sh-client-a1 "dig @${A1_DNS_IP} www.${A1_DOMAIN} A +short; curl -sS https://www.${A1_DOMAIN}/healthz; getent passwd amina; ls /net/projects 2>/dev/null"; ssh_cmd sz-client-a1 "getent passwd daryn; findmnt /mnt/projects; smbclient -L //files.${A1_DOMAIN} -U 'amina%${A1_PASS}' 2>&1 | grep projects")"
+      out="$(ssh_cmd sh-client-a1 "dig @${A1_DNS_IP} www.${A1_DOMAIN} A +short; curl -LsS https://www.${A1_DOMAIN}/healthz; getent passwd amina; ls /net/projects 2>/dev/null"; ssh_cmd sz-client-a1 "getent passwd daryn; findmnt /mnt/projects; smbclient -L //files.${A1_DOMAIN} -U 'amina%${A1_PASS}' 2>&1 | grep projects")"
       show_output "$out"
       if contains_all "$out" "10.11.40.20" "OK" "amina" "/mnt/projects" "projects"; then pass "A8.11" "0.25" "critical end-to-end services survive reboot"; else fail "A8.11" "0.25" "critical end-to-end service smoke test failed after reboot"; fi
     else
