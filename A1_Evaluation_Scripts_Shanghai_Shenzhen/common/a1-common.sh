@@ -27,6 +27,7 @@ A1_COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 A1_PACKAGE_DIR="$(cd "$A1_COMMON_DIR/.." && pwd)"
 A1_CRITERIA_MAP="${A1_CRITERIA_MAP:-$A1_PACKAGE_DIR/criteria/a1_criteria_map.tsv}"
 A1_LAST_CONTEXT_ID=""
+A1_PENDING_OUTPUT=""
 
 mkdir -p "$A1_REPORT_DIR"
 
@@ -118,12 +119,34 @@ print_criterion_context() {
   ' "$A1_CRITERIA_MAP" | tee -a "$A1_DETAIL_LOG"
 }
 
+show_output() {
+  local text
+  if [ -n "$1" ]; then
+    text="$1"
+  else
+    text="(empty output)"
+  fi
+
+  if [ -n "$A1_PENDING_OUTPUT" ]; then
+    A1_PENDING_OUTPUT+=$'\n'
+  fi
+  A1_PENDING_OUTPUT+="$text"
+}
+
+flush_output() {
+  [ -n "$A1_PENDING_OUTPUT" ] || return 0
+  echo -e "${BLUE}Фактический вывод:${NC}" | tee -a "$A1_DETAIL_LOG"
+  printf "%s\n" "$A1_PENDING_OUTPUT" | tee -a "$A1_DETAIL_LOG"
+  A1_PENDING_OUTPUT=""
+}
+
 record_result() {
   local id="$1"; shift
   local mark="$1"; shift
   local status="$1"; shift
   local msg="$*"
   print_criterion_context "$id"
+  flush_output
   printf "%s\t%s\t%s\t%s\n" "$id" "$mark" "$status" "$msg" >> "$A1_RESULTS_TSV"
   case "$status" in
     PASS) echo -e "${GREEN}OK [$id/$mark] - $msg${NC}" ;;

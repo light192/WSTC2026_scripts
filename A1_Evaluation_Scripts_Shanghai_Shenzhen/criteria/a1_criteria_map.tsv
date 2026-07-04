@@ -220,9 +220,8 @@ ssh root@sz-gw-a1 'systemctl is-active nftables; nft list ruleset'
 ssh root@sh-client-a1 'curl -Ls http://www.orion.a1.test/'"	nftables active после reboot. Разрешённые сервисные потоки продолжают работать.
 A8.1	A8	0.25	id-a1 работает как central syslog receiver	"Выполнить:
 ssh root@id-a1 'systemctl is-active rsyslog; ss -lunp | grep 514 || ss -lntp | grep 514 || true'"	rsyslog active. id-a1 слушает выбранный syslog transport UDP/514 или TCP/514 либо иным образом принимает remote logs.
-A8.2	A8	0.25	Файл syslog-transport.txt создан и не конфликтует с notes.txt	"Выполнить:
-ssh root@sz-client-a1 'cat /opt/grading/a1/syslog-transport.txt'
-ssh root@sz-client-a1 'cat /opt/grading/a1/notes.txt'"	syslog-transport.txt содержит udp/514 или tcp/514. notes.txt содержит incomplete=none/none или список невыполненных частей без обязательного смешивания с transport.
+A8.2	A8	0.25	Выбранный syslog transport указан в notes.txt	"Выполнить:
+ssh root@sz-client-a1 'cat /opt/grading/a1/notes.txt'"	notes.txt содержит выбранный transport: udp/514 или tcp/514. Также notes.txt содержит none/incomplete=none или краткий список невыполненных частей.
 A8.3	A8	0.5	Remote logs принимаются от всех требуемых хостов и разделены по hostname	"Сгенерировать:
 for h in sh-gw-a1 sz-gw-a1 web-a1 files-a1 sz-client-a1 sh-client-a1; do ssh root@$h ""logger A1_LOG_TEST_$h""; done
 Проверить:
@@ -233,7 +232,7 @@ ssh root@id-a1 'grep -R ""A1-SH-DROP\|A1-SZ-DROP"" /var/log/remote 2>/dev/null |
 A8.5	A8	0.5	В central logs видны web, file service и auth-related события	"Сгенерировать web/NFS/Samba/login действия, затем:
 ssh root@id-a1 'grep -R ""web-a1\|nginx\|apache\|files-a1\|smbd\|nfs\|sssd\|slapd"" /var/log/remote 2>/dev/null | tail -50'"	В remote logs видны события web-a1, files-a1 и auth/LDAP/SSSD-related события.
 A8.6	A8	0.5	Evidence directory содержит обязательные файлы	"Выполнить:
-ssh root@sz-client-a1 'ls -ld /opt/grading/a1; ls -l /opt/grading/a1/checks.txt /opt/grading/a1/notes.txt /opt/grading/a1/ca.pem /opt/grading/a1/id-a1.pem /opt/grading/a1/web-a1.pem /opt/grading/a1/syslog-transport.txt'"	/opt/grading/a1 существует. Обязательные evidence-файлы присутствуют и не пустые.
+ssh root@sz-client-a1 'ls -ld /opt/grading/a1; ls -l /opt/grading/a1/checks.txt /opt/grading/a1/notes.txt /opt/grading/a1/ca.pem /opt/grading/a1/id-a1.pem /opt/grading/a1/web-a1.pem'"	/opt/grading/a1 существует. Обязательные evidence-файлы присутствуют и не пустые.
 A8.7	A8	0.5	a1-selfcheck.sh создан, исполняемый и запускается без интерактивного ввода	"Выполнить:
 ssh root@sz-client-a1 'test -x /opt/a1-checks/a1-selfcheck.sh && timeout 120 /opt/a1-checks/a1-selfcheck.sh; echo EXIT:$?'"	Скрипт исполняемый, завершается за разумное время без ввода с клавиатуры, exit code 0 или документированный ненулевой при FAIL-checks.
 A8.8	A8	0.5	checks.txt содержит команды, выводы и PASS/FAIL по всем основным блокам	"Выполнить:

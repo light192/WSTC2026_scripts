@@ -534,9 +534,9 @@ check_A4() {
 
   if should_run_criterion "A4.11"; then
     step "A4.11 timur sudo"
-    out="$(ssh_cmd sz-client-a1 "su - timur -c 'sudo -n true && echo SUDO_OK' 2>&1")"
+    out="$(ssh_cmd sz-client-a1 "su - timur -c \"sudo -n id || printf '%s\\n' '${A1_PASS}' | sudo -S id\" 2>&1")"
     show_output "$out"
-    if echo "$out" | grep -q "SUDO_OK"; then pass "A4.11" "0.25" "timur has sudo"; else fail "A4.11" "0.25" "timur sudo missing/needs password"; fi
+    if echo "$out" | grep -q "uid=0(root)"; then pass "A4.11" "0.25" "timur has sudo"; else fail "A4.11" "0.25" "timur sudo missing or password rejected"; fi
   fi
 
   if should_run_criterion "A4.12"; then
@@ -650,9 +650,9 @@ check_A6() {
 
   if should_run_criterion "A6.9"; then
     if [ "$RUN_POST_REBOOT" = "1" ]; then
-      out="$(ssh_cmd files-a1 'systemctl is-active nfs-server nfs-kernel-server smbd 2>/dev/null || true'; ssh_cmd sz-client-a1 'findmnt /mnt/projects'; ssh_cmd sh-client-a1 'cat /net/projects/a1-nfs-ok.txt 2>/dev/null')"
+      out="$(ssh_cmd files-a1 'systemctl is-active nfs-server nfs-kernel-server smbd 2>/dev/null || true'; ssh_cmd sz-client-a1 'findmnt /mnt/projects; cat /mnt/projects/a1-nfs-ok.txt 2>&1'; ssh_cmd sh-client-a1 'ls /net/projects 2>&1; cat /net/projects/a1-nfs-ok.txt 2>&1'; ssh_cmd sz-client-a1 "smbclient //files.${A1_DOMAIN}/projects -U 'amina%${A1_PASS}' -c 'ls' 2>&1")"
       show_output "$out"
-      if contains_all "$out" "active" "/mnt/projects" "A1_NFS_OK"; then pass "A6.9" "0.50" "NFS/Samba persistent after reboot"; else fail "A6.9" "0.50" "NFS/Samba not persistent"; fi
+      if [ "$(echo "$out" | grep -c '^active$')" -ge 2 ] && echo "$out" | grep -q "/mnt/projects" && [ "$(echo "$out" | grep -c '^A1_NFS_OK$')" -ge 2 ] && echo "$out" | grep -Eiq "blocks|Disk|projects"; then pass "A6.9" "0.50" "NFS/Samba persistent after reboot"; else fail "A6.9" "0.50" "NFS/Samba not persistent"; fi
     else
       skip "A6.9" "0.50" "post-reboot check не запущен"
     fi
@@ -745,9 +745,9 @@ check_A8() {
   fi
 
   if should_run_criterion "A8.2"; then
-    out="$(ssh_cmd sz-client-a1 'cat /opt/grading/a1/syslog-transport.txt 2>/dev/null')"
+    out="$(ssh_cmd sz-client-a1 'cat /opt/grading/a1/notes.txt 2>/dev/null')"
     show_output "$out"
-    if echo "$out" | grep -Eq 'udp/514|tcp/514'; then pass "A8.2" "0.25" "syslog-transport.txt exists and is valid"; else fail "A8.2" "0.25" "syslog-transport.txt missing/invalid"; fi
+    if echo "$out" | grep -Eiq 'udp/514|tcp/514|udp 514|tcp 514'; then pass "A8.2" "0.25" "notes.txt states selected syslog transport"; else fail "A8.2" "0.25" "notes.txt does not state selected syslog transport"; fi
   fi
 
   if should_run_criterion "A8.3"; then
@@ -771,7 +771,7 @@ check_A8() {
   fi
 
   if should_run_criterion "A8.6"; then
-    out="$(ssh_cmd sz-client-a1 'ls -l /opt/grading/a1; test -s /opt/grading/a1/ca.pem; test -s /opt/grading/a1/id-a1.pem; test -s /opt/grading/a1/web-a1.pem; test -s /opt/grading/a1/syslog-transport.txt; test -s /opt/grading/a1/checks.txt; test -s /opt/grading/a1/notes.txt; echo EVIDENCE_RC:$?')"
+    out="$(ssh_cmd sz-client-a1 'ls -l /opt/grading/a1; test -s /opt/grading/a1/ca.pem; test -s /opt/grading/a1/id-a1.pem; test -s /opt/grading/a1/web-a1.pem; test -s /opt/grading/a1/checks.txt; test -s /opt/grading/a1/notes.txt; echo EVIDENCE_RC:$?')"
     show_output "$out"
     if echo "$out" | grep -q "EVIDENCE_RC:0"; then pass "A8.6" "0.50" "required evidence files exist"; else fail "A8.6" "0.50" "evidence files missing"; fi
   fi
