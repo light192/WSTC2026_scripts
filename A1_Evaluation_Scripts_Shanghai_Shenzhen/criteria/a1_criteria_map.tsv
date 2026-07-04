@@ -49,13 +49,9 @@ A2.3	A2	0.25	Forward zone обслуживает AAAA-записи всех ос
 for n in sh-client-a1 sz-client-a1 files-a1 id-a1 web-a1; do
   dig @10.11.40.10 $n.orion.a1.test AAAA +short
 done"	Каждое имя возвращает ожидаемый IPv6 адрес из таблицы задания.
-A2.4	A2	0.25	DNS для multi-interface gateway-хостов однозначен и проверяем	"Выполнить:
+A2.4	A2	0.25	DNS для multi-address gateway-хостов однозначен и проверяем	"Выполнить:
 dig @10.11.40.10 sh-gw-a1.orion.a1.test A +short
-dig @10.11.40.10 sh-gw-wan-a1.orion.a1.test A +short
-dig @10.11.40.10 sz-gw-a1.orion.a1.test A +short
-dig @10.11.40.10 sz-gw-wan-a1.orion.a1.test A +short
-dig @10.11.40.10 sz-gw-files-a1.orion.a1.test A +short
-dig @10.11.40.10 sz-gw-srv-a1.orion.a1.test A +short"	Interface-specific names возвращают соответствующие адреса: 10.11.10.1, 198.51.100.10, 10.11.20.1, 198.51.100.20, 10.11.30.1, 10.11.40.1.
+dig @10.11.40.10 sz-gw-a1.orion.a1.test A +short"	Gateway hostnames возвращают адреса из таблицы задания: sh-gw-a1 -> 10.11.10.1 и 198.51.100.10; sz-gw-a1 -> 198.51.100.20, 10.11.20.1, 10.11.30.1, 10.11.40.1. Interface/segment labels вроде WAN, SZ-FILES и SZ-SERVERS не проверяются как hostname.
 A2.5	A2	0.5	IPv4 PTR-записи настроены для всех IPv4-адресов оцениваемых хостов	"Выполнить:
 for ip in 10.11.10.20 10.11.20.20 10.11.30.10 10.11.40.10 10.11.40.20 198.51.100.10 198.51.100.20; do
   dig @10.11.40.10 -x $ip +short
@@ -89,8 +85,8 @@ ssh root@sz-client-a1 'openssl x509 -in /opt/grading/a1/id-a1.pem -noout -text |
 A3.4	A3	0.5	Web certificate содержит требуемые SAN	"Выполнить:
 ssh root@sz-client-a1 'openssl x509 -in /opt/grading/a1/web-a1.pem -noout -text | grep -A2 ""Subject Alternative Name""'"	SAN содержит DNS:web-a1.orion.a1.test и DNS:www.orion.a1.test.
 A3.5	A3	0.5	LDAP StartTLS проверяется без отключения проверки сертификата	"Выполнить:
-ssh root@sz-client-a1 'LDAPTLS_CACERT=/opt/grading/a1/ca.pem ldapwhoami -H ldap://ldap.orion.a1.test -ZZ -x'
-ssh root@sh-client-a1 'ldapsearch -H ldap://ldap.orion.a1.test -ZZ -x -b dc=orion,dc=a1,dc=test -s base dn'"	StartTLS negotiation успешна. Сертификат доверяется. ldapwhoami возвращает anonymous или DN без TLS errors.
+ssh root@sz-client-a1 'LDAPTLS_CACERT=/opt/grading/a1/ca.pem ldapwhoami -H ldap://ldap.orion.a1.test -ZZ -x -D ""cn=admin,dc=orion,dc=a1,dc=test"" -w ""Skill39@A1""'
+ssh root@sh-client-a1 'ldapwhoami -H ldap://ldap.orion.a1.test -ZZ -x -D ""cn=admin,dc=orion,dc=a1,dc=test"" -w ""Skill39@A1""'"	StartTLS negotiation успешна. Сертификат доверяется. ldapwhoami возвращает DN без TLS errors. Anonymous bind для этой проверки не требуется.
 A3.6	A3	0.25	HTTPS trust проверяется без -k с обоих клиентов	"Выполнить:
 ssh root@sz-client-a1 'curl -sS https://www.orion.a1.test/'
 ssh root@sh-client-a1 'curl -sS https://www.orion.a1.test/'"	Обе команды выполняются без -k/--insecure и возвращают A1_WEB_HTTPS_OK.
@@ -192,7 +188,7 @@ ssh root@sh-client-a1 'nc -vz 10.11.20.1 22 || true'"	SSH с sz-client к sz-gw 
 A7.4	A7	0.25	Разрешены требуемые SH-LAN → id-a1 потоки DNS и LDAP StartTLS	"Выполнить:
 ssh root@sh-client-a1 'dig @10.11.40.10 www.orion.a1.test A +short'
 ssh root@sh-client-a1 'nc -vz id-a1.orion.a1.test 389'
-ssh root@sh-client-a1 'ldapsearch -H ldap://ldap.orion.a1.test -ZZ -x -b dc=orion,dc=a1,dc=test -s base dn'"	DNS и LDAP StartTLS из Shanghai к id-a1 доступны и работают.
+ssh root@sh-client-a1 'ldapwhoami -H ldap://ldap.orion.a1.test -ZZ -x -D ""cn=admin,dc=orion,dc=a1,dc=test"" -w ""Skill39@A1""'"	DNS и LDAP StartTLS из Shanghai к id-a1 доступны и работают.
 A7.5	A7	0.25	Разрешены требуемые SH-LAN → web-a1 HTTP/HTTPS потоки	"Выполнить:
 ssh root@sh-client-a1 'curl -s http://www.orion.a1.test/'
 ssh root@sh-client-a1 'curl -sS https://www.orion.a1.test/'"	Из Shanghai web HTTP/HTTPS доступны и возвращают A1_WEB_HTTP_OK / A1_WEB_HTTPS_OK.

@@ -79,15 +79,15 @@ check_id() {
   show_output "$out"
   if echo "$out" | grep -q "active" && echo "$out" | grep -q ":389"; then pass "A4.1" "0.25" "OpenLDAP active/listening"; else fail "A4.1" "0.25" "OpenLDAP inactive/not listening"; fi
 
-  out="$(ldapsearch -H ldap://localhost -x -b ${A1_BASE_DN} dn 2>&1)"
+  out="$(ldapsearch -H ldap://localhost -x -D "${A1_BIND_DN}" -w "${A1_PASS}" -b ${A1_BASE_DN} '(objectClass=organizationalUnit)' dn 2>&1)"
   show_output "$out"
   if contains_all "$out" "ou=People,${A1_BASE_DN}" "ou=Groups,${A1_BASE_DN}" "ou=Services,${A1_BASE_DN}"; then pass "A4.2" "0.25" "Base DN/OU exist"; else fail "A4.2" "0.25" "Base DN/OU missing"; fi
 
-  out="$(ldapsearch -H ldap://localhost -x -b ou=Groups,${A1_BASE_DN} cn gidNumber 2>&1)"
+  out="$(ldapsearch -H ldap://localhost -x -D "${A1_BIND_DN}" -w "${A1_PASS}" -b ou=Groups,${A1_BASE_DN} cn gidNumber 2>&1)"
   show_output "$out"
   if contains_all "$out" "gidNumber: 7100" "gidNumber: 7200" "gidNumber: 7300"; then pass "A4.3" "0.25" "LDAP groups OK"; else fail "A4.3" "0.25" "LDAP groups missing/wrong"; fi
 
-  out="$(ldapsearch -H ldap://localhost -x -b ou=People,${A1_BASE_DN} uid uidNumber gidNumber loginShell 2>&1)"
+  out="$(ldapsearch -H ldap://localhost -x -D "${A1_BIND_DN}" -w "${A1_PASS}" -b ou=People,${A1_BASE_DN} uid uidNumber gidNumber loginShell 2>&1)"
   show_output "$out"
   if contains_all "$out" "uidNumber: 8101" "uidNumber: 8102" "uidNumber: 8103" "loginShell: /bin/bash"; then pass "A4.4" "0.25" "LDAP users OK"; else fail "A4.4" "0.25" "LDAP users missing/wrong"; fi
 

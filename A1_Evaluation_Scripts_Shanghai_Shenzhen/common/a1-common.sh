@@ -15,6 +15,7 @@ NC='\033[0m'
 A1_DOMAIN="${A1_DOMAIN:-orion.a1.test}"
 A1_PASS="${A1_PASS:-Skill39@A1}"
 A1_BASE_DN="${A1_BASE_DN:-dc=orion,dc=a1,dc=test}"
+A1_BIND_DN="${A1_BIND_DN:-cn=admin,${A1_BASE_DN}}"
 A1_LDAP_URI="${A1_LDAP_URI:-ldap://id-a1.orion.a1.test}"
 A1_DNS_IP="${A1_DNS_IP:-10.11.40.10}"
 A1_REPORT_DIR="${A1_REPORT_DIR:-./reports}"

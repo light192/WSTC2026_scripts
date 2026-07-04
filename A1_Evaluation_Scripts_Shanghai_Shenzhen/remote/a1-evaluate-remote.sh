@@ -334,13 +334,18 @@ check_A2() {
   fi
 
   if should_run_criterion "A2.4"; then
-    step "A2.4 DNS для multi-interface gateways"
-    names=(sh-gw-a1 sh-gw-wan-a1 sz-gw-a1 sz-gw-wan-a1 sz-gw-files-a1 sz-gw-srv-a1)
+    step "A2.4 DNS for multi-address gateway hostnames"
+    declare -A GW_A_REC=(
+      [sh-gw-a1]="10.11.10.1 198.51.100.10"
+      [sz-gw-a1]="198.51.100.20 10.11.20.1 10.11.30.1 10.11.40.1"
+    )
     ok=1
-    for n in "${names[@]}"; do
-      out="$(ssh_cmd sz-client-a1 "dig @${A1_DNS_IP} +short ${n}.${A1_DOMAIN} A")"; show_output "$n -> $out"; [ -n "$out" ] || ok=0
+    for n in "${!GW_A_REC[@]}"; do
+      out="$(ssh_cmd sz-client-a1 "dig @${A1_DNS_IP} +short ${n}.${A1_DOMAIN} A")"
+      show_output "$n A -> $out"
+      for ip in ${GW_A_REC[$n]}; do echo "$out" | grep -qx "$ip" || ok=0; done
     done
-    [ "$ok" -eq 1 ] && pass "A2.4" "0.25" "interface-specific gateway DNS names resolve" || fail "A2.4" "0.25" "gateway DNS names incomplete or ambiguous"
+    [ "$ok" -eq 1 ] && pass "A2.4" "0.25" "gateway hostnames resolve to their task IPv4 addresses" || fail "A2.4" "0.25" "gateway hostname A records are incomplete"
   fi
 
   if should_run_criterion "A2.5"; then
@@ -433,16 +438,16 @@ check_A3() {
 
   if should_run_criterion "A3.5"; then
     step "A3.5 LDAP StartTLS"
-    out="$(ssh_cmd sz-client-a1 "LDAPTLS_REQCERT=demand ldapsearch -H ldap://ldap.${A1_DOMAIN} -ZZ -x -b ${A1_BASE_DN} -s base dn 2>&1")"
+    out="$(ssh_cmd sz-client-a1 "LDAPTLS_REQCERT=demand ldapwhoami -H ldap://ldap.${A1_DOMAIN} -ZZ -x -D '${A1_BIND_DN}' -w '${A1_PASS}' 2>&1")"
     show_output "$out"
-    if echo "$out" | grep -q "result: 0 Success"; then pass "A3.5" "0.50" "LDAP StartTLS works with certificate validation"; else fail "A3.5" "0.50" "LDAP StartTLS validation failed"; fi
+    if echo "$out" | grep -q "dn:${A1_BIND_DN}"; then pass "A3.5" "0.50" "LDAP StartTLS works with certificate validation"; else fail "A3.5" "0.50" "LDAP StartTLS validation failed"; fi
   fi
 
   if should_run_criterion "A3.6"; then
     step "A3.6 HTTPS trust from both clients"
-    out="$(ssh_cmd sz-client-a1 "curl -sS https://www.${A1_DOMAIN}/healthz 2>&1"; ssh_cmd sh-client-a1 "curl -sS https://www.${A1_DOMAIN}/healthz 2>&1")"
+    out="$(ssh_cmd sz-client-a1 "curl -sS https://www.${A1_DOMAIN}/ 2>&1"; ssh_cmd sh-client-a1 "curl -sS https://www.${A1_DOMAIN}/ 2>&1")"
     show_output "$out"
-    if [ "$(echo "$out" | grep -c '^OK$')" -ge 2 ]; then pass "A3.6" "0.25" "HTTPS trust works from both clients"; else fail "A3.6" "0.25" "HTTPS trust failed from one/both clients"; fi
+    if [ "$(echo "$out" | grep -c '^A1_WEB_HTTPS_OK$')" -ge 2 ]; then pass "A3.6" "0.25" "HTTPS trust works from both clients"; else fail "A3.6" "0.25" "HTTPS trust failed from one/both clients"; fi
   fi
 
   if should_run_criterion "A3.7"; then
@@ -466,21 +471,21 @@ check_A4() {
 
   if should_run_criterion "A4.2"; then
     step "A4.2 Base DN and OU"
-    out="$(ssh_cmd id-a1 "ldapsearch -H ldap://localhost -x -b ${A1_BASE_DN} dn 2>&1")"
+    out="$(ssh_cmd id-a1 "ldapsearch -H ldap://localhost -x -D '${A1_BIND_DN}' -w '${A1_PASS}' -b ${A1_BASE_DN} '(objectClass=organizationalUnit)' dn 2>&1")"
     show_output "$out"
     if contains_all "$out" "ou=People,${A1_BASE_DN}" "ou=Groups,${A1_BASE_DN}" "ou=Services,${A1_BASE_DN}"; then pass "A4.2" "0.25" "Base DN/OU exist"; else fail "A4.2" "0.25" "Base DN/OU missing"; fi
   fi
 
   if should_run_criterion "A4.3"; then
     step "A4.3 LDAP groups gidNumber"
-    out="$(ssh_cmd id-a1 "ldapsearch -H ldap://localhost -x -b ou=Groups,${A1_BASE_DN} '(|(cn=linuxadmins)(cn=developers)(cn=operators))' cn gidNumber 2>&1")"
+    out="$(ssh_cmd id-a1 "ldapsearch -H ldap://localhost -x -D '${A1_BIND_DN}' -w '${A1_PASS}' -b ou=Groups,${A1_BASE_DN} '(|(cn=linuxadmins)(cn=developers)(cn=operators))' cn gidNumber 2>&1")"
     show_output "$out"
     if contains_all "$out" "cn: linuxadmins" "gidNumber: 7100" "cn: developers" "gidNumber: 7200" "cn: operators" "gidNumber: 7300"; then pass "A4.3" "0.25" "LDAP groups correct"; else fail "A4.3" "0.25" "LDAP groups missing/wrong gidNumber"; fi
   fi
 
   if should_run_criterion "A4.4"; then
     step "A4.4 LDAP users attributes"
-    out="$(ssh_cmd id-a1 "ldapsearch -H ldap://localhost -x -b ou=People,${A1_BASE_DN} '(|(uid=amina)(uid=daryn)(uid=timur))' uid uidNumber gidNumber loginShell 2>&1")"
+    out="$(ssh_cmd id-a1 "ldapsearch -H ldap://localhost -x -D '${A1_BIND_DN}' -w '${A1_PASS}' -b ou=People,${A1_BASE_DN} '(|(uid=amina)(uid=daryn)(uid=timur))' uid uidNumber gidNumber loginShell 2>&1")"
     show_output "$out"
     if contains_all "$out" "uid: amina" "uidNumber: 8101" "uid: daryn" "uidNumber: 8102" "uid: timur" "uidNumber: 8103" "loginShell: /bin/bash"; then pass "A4.4" "0.25" "LDAP users correct"; else fail "A4.4" "0.25" "LDAP users attributes missing/wrong"; fi
   fi
@@ -677,9 +682,9 @@ check_A7() {
   fi
 
   if should_run_criterion "A7.4"; then
-    out="$(ssh_cmd sh-client-a1 "dig @10.11.40.10 www.${A1_DOMAIN} A +short; nc -vz -w2 10.11.40.10 389")"
+    out="$(ssh_cmd sh-client-a1 "dig @10.11.40.10 www.${A1_DOMAIN} A +short; nc -vz -w2 10.11.40.10 389; ldapwhoami -H ldap://ldap.${A1_DOMAIN} -ZZ -x -D '${A1_BIND_DN}' -w '${A1_PASS}'")"
     show_output "$out"
-    if contains_all "$out" "10.11.40.20" "succeeded"; then pass "A7.4" "0.25" "SH-LAN to id-a1 DNS/LDAP allowed"; else fail "A7.4" "0.25" "SH-LAN to id-a1 flows not allowed"; fi
+    if contains_all "$out" "10.11.40.20" "succeeded" "dn:${A1_BIND_DN}"; then pass "A7.4" "0.25" "SH-LAN to id-a1 DNS/LDAP StartTLS allowed"; else fail "A7.4" "0.25" "SH-LAN to id-a1 flows not allowed"; fi
   fi
 
   if should_run_criterion "A7.5"; then
