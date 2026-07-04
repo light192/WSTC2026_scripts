@@ -77,7 +77,7 @@ A3.1	A3	0.25	Root CA создан с требуемым именем и сохр
 ssh root@sz-client-a1 'openssl x509 -in /opt/grading/a1/ca.pem -noout -subject -issuer'"	Subject/Issuer содержит Orion A1 Root CA. Файл /opt/grading/a1/ca.pem существует и читается.
 A3.2	A3	0.25	Root CA установлен как доверенный на клиентах и сервисных хостах	"Выполнить:
 for h in sz-client-a1 sh-client-a1 files-a1 web-a1; do
-  ssh root@$h 'grep -R ""Orion A1 Root CA"" /etc/ssl/certs 2>/dev/null | head -1 || update-ca-certificates -f >/tmp/ca_check.log 2>&1; true'
+  ssh root@$h 'find -L /etc/ssl/certs /usr/local/share/ca-certificates -type f \( -name ""*.pem"" -o -name ""*.crt"" \) 2>/dev/null | while read cert; do openssl x509 -in ""$cert"" -noout -subject 2>/dev/null | grep -q ""Orion A1 Root CA"" && echo ""$cert"" && break; done'
 done
 Функционально проверить TLS в последующих аспектах."	CA присутствует в trust store или TLS-подключения к web/LDAP проходят без отключения проверки сертификата.
 A3.3	A3	0.5	LDAP certificate содержит требуемые SAN	"Выполнить:
@@ -151,9 +151,9 @@ A6.2	A6	0.25	NFSv4 export /srv/nfs/projects доступен через TCP/2049
 ssh root@files-a1 'exportfs -v; ss -lntp | grep "":2049""'
 ssh root@sz-client-a1 'nc -vz files.orion.a1.test 2049'"	Export опубликован. NFSv4 доступен по TCP/2049. NFSv3/rpcbind/mountd не требуются и не оцениваются.
 A6.3	A6	0.5	sz-client-a1 persistently монтирует NFS в /mnt/projects	"Выполнить:
-ssh root@sz-client-a1 'findmnt /mnt/projects; cat /mnt/projects/a1-nfs-ok.txt'"	/mnt/projects смонтирован. Файл a1-nfs-ok.txt читается и содержит A1_NFS_OK.
+ssh root@sz-client-a1 'findmnt /mnt/projects; cat /mnt/projects/a1-nfs-ok.txt || su - amina -c ""cat /mnt/projects/a1-nfs-ok.txt""'"	/mnt/projects смонтирован. Файл a1-nfs-ok.txt читается и содержит A1_NFS_OK. Если root ограничен root_squash, допустимо чтение от LDAP-пользователя amina.
 A6.4	A6	0.5	sh-client-a1 монтирует NFS через autofs в /net/projects	"Выполнить:
-ssh root@sh-client-a1 'systemctl is-active autofs; ls /net/projects; cat /net/projects/a1-nfs-ok.txt'"	autofs active. При обращении /net/projects монтируется NFS export. Файл содержит A1_NFS_OK.
+ssh root@sh-client-a1 'systemctl is-active autofs; ls /net/projects || su - amina -c ""ls /net/projects""; cat /net/projects/a1-nfs-ok.txt || su - amina -c ""cat /net/projects/a1-nfs-ok.txt""'"	autofs active. При обращении /net/projects монтируется NFS export. Файл содержит A1_NFS_OK. Если root ограничен root_squash, допустимо чтение от LDAP-пользователя amina.
 A6.5	A6	0.25	Root squash для NFS включён и эффективен	"Выполнить:
 ssh root@sh-client-a1 'touch /net/projects/root-squash-test.txt 2>/tmp/a1err || true; ls -l /net/projects/root-squash-test.txt 2>/dev/null || cat /tmp/a1err'
 ssh root@files-a1 'ls -l /srv/nfs/projects/root-squash-test.txt 2>/dev/null || true'"	Root с клиента не получает root-владение на сервере. Файл либо не создаётся, либо принадлежит nobody/nogroup или anonuid/anongid, но не root:root.
@@ -171,8 +171,8 @@ ssh root@sz-client-a1 'echo A1_DARYN_FAIL > /tmp/daryn.txt'
 smbclient //files.orion.a1.test/projects -U daryn%Skill39@A1 -c 'put /tmp/daryn.txt daryn-should-fail.txt' || true"	daryn listing/read успешен. Попытка put завершается отказом доступа.
 A6.9	A6	0.5	NFS/Samba сохраняют работоспособность после reboot files-a1 и клиентов	"Перезагрузить files-a1, sz-client-a1, sh-client-a1.
 После восстановления:
-ssh root@sz-client-a1 'findmnt /mnt/projects; cat /mnt/projects/a1-nfs-ok.txt'
-ssh root@sh-client-a1 'ls /net/projects && cat /net/projects/a1-nfs-ok.txt'
+ssh root@sz-client-a1 'findmnt /mnt/projects; cat /mnt/projects/a1-nfs-ok.txt || su - amina -c ""cat /mnt/projects/a1-nfs-ok.txt""'
+ssh root@sh-client-a1 'ls /net/projects || su - amina -c ""ls /net/projects""; cat /net/projects/a1-nfs-ok.txt || su - amina -c ""cat /net/projects/a1-nfs-ok.txt""'
 smbclient //files.orion.a1.test/projects -U amina%Skill39@A1 -c 'ls'"	После reboot NFS persistent mount, autofs и Samba share работают без ручной настройки.
 A7.1	A7	0.25	nftables active на sh-gw-a1 и sz-gw-a1	"Выполнить:
 ssh root@sh-gw-a1 'systemctl is-active nftables; nft list ruleset'

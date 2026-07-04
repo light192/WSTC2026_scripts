@@ -417,7 +417,7 @@ check_A3() {
     step "A3.2 CA trust installed"
     ok=1
     for h in sz-client-a1 sh-client-a1 files-a1 web-a1; do
-      out="$(ssh_cmd "$h" 'openssl verify -CApath /etc/ssl/certs /opt/grading/a1/ca.pem 2>/dev/null || grep -R "Orion A1 Root CA" /etc/ssl/certs /usr/local/share/ca-certificates 2>/dev/null || true')"; show_output "--- $h ---"$'\n'"$out"; [ -n "$out" ] || ok=0
+      out="$(ssh_cmd "$h" 'find -L /etc/ssl/certs /usr/local/share/ca-certificates -type f \( -name "*.pem" -o -name "*.crt" \) 2>/dev/null | while IFS= read -r cert; do subject="$(openssl x509 -in "$cert" -noout -subject 2>/dev/null || true)"; if echo "$subject" | grep -q "Orion A1 Root CA"; then echo "$cert: $subject"; exit 0; fi; done')"; show_output "--- $h ---"$'\n'"$out"; [ -n "$out" ] || ok=0
     done
     [ "$ok" -eq 1 ] && pass "A3.2" "0.25" "CA appears trusted on required hosts" || fail "A3.2" "0.25" "CA trust missing on some hosts"
   fi
@@ -613,15 +613,15 @@ check_A6() {
   fi
 
   if should_run_criterion "A6.3"; then
-    out="$(ssh_cmd sz-client-a1 'findmnt /mnt/projects; cat /mnt/projects/a1-nfs-ok.txt 2>/dev/null')"
+    out="$(ssh_cmd sz-client-a1 "findmnt /mnt/projects; cat /mnt/projects/a1-nfs-ok.txt 2>&1 || su - amina -c 'cat /mnt/projects/a1-nfs-ok.txt' 2>&1")"
     show_output "$out"
     if contains_all "$out" "/mnt/projects" "A1_NFS_OK"; then pass "A6.3" "0.50" "sz-client persistent NFS mount works"; else fail "A6.3" "0.50" "sz-client NFS mount missing/broken"; fi
   fi
 
   if should_run_criterion "A6.4"; then
-    out="$(ssh_cmd sh-client-a1 'ls /net/projects 2>&1; cat /net/projects/a1-nfs-ok.txt 2>/dev/null')"
+    out="$(ssh_cmd sh-client-a1 "systemctl is-active autofs 2>/dev/null || true; ls /net/projects 2>&1 || su - amina -c 'ls /net/projects' 2>&1; cat /net/projects/a1-nfs-ok.txt 2>&1 || su - amina -c 'cat /net/projects/a1-nfs-ok.txt' 2>&1")"
     show_output "$out"
-    if echo "$out" | grep -q "A1_NFS_OK"; then pass "A6.4" "0.50" "sh-client autofs NFS works"; else fail "A6.4" "0.50" "sh-client autofs NFS missing/broken"; fi
+    if echo "$out" | grep -q "active" && echo "$out" | grep -q "A1_NFS_OK"; then pass "A6.4" "0.50" "sh-client autofs NFS works"; else fail "A6.4" "0.50" "sh-client autofs NFS missing/broken"; fi
   fi
 
   if should_run_criterion "A6.5"; then
@@ -650,7 +650,7 @@ check_A6() {
 
   if should_run_criterion "A6.9"; then
     if [ "$RUN_POST_REBOOT" = "1" ]; then
-      out="$(ssh_cmd files-a1 'systemctl is-active nfs-server nfs-kernel-server smbd 2>/dev/null || true'; ssh_cmd sz-client-a1 'findmnt /mnt/projects; cat /mnt/projects/a1-nfs-ok.txt 2>&1'; ssh_cmd sh-client-a1 'ls /net/projects 2>&1; cat /net/projects/a1-nfs-ok.txt 2>&1'; ssh_cmd sz-client-a1 "smbclient //files.${A1_DOMAIN}/projects -U 'amina%${A1_PASS}' -c 'ls' 2>&1")"
+      out="$(ssh_cmd files-a1 'systemctl is-active nfs-server nfs-kernel-server smbd 2>/dev/null || true'; ssh_cmd sz-client-a1 "findmnt /mnt/projects; cat /mnt/projects/a1-nfs-ok.txt 2>&1 || su - amina -c 'cat /mnt/projects/a1-nfs-ok.txt' 2>&1"; ssh_cmd sh-client-a1 "ls /net/projects 2>&1 || su - amina -c 'ls /net/projects' 2>&1; cat /net/projects/a1-nfs-ok.txt 2>&1 || su - amina -c 'cat /net/projects/a1-nfs-ok.txt' 2>&1"; ssh_cmd sz-client-a1 "smbclient //files.${A1_DOMAIN}/projects -U 'amina%${A1_PASS}' -c 'ls' 2>&1")"
       show_output "$out"
       if [ "$(echo "$out" | grep -c '^active$')" -ge 2 ] && echo "$out" | grep -q "/mnt/projects" && [ "$(echo "$out" | grep -c '^A1_NFS_OK$')" -ge 2 ] && echo "$out" | grep -Eiq "blocks|Disk|projects"; then pass "A6.9" "0.50" "NFS/Samba persistent after reboot"; else fail "A6.9" "0.50" "NFS/Samba not persistent"; fi
     else

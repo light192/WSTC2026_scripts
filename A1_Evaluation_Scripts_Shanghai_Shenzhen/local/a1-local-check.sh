@@ -146,14 +146,14 @@ check_client_mounts() {
   if echo "$out" | grep -q "10.11.40.20" && [ "$(echo "$out" | grep -c '^OK$')" -ge 2 ]; then pass "LOCAL.CLIENT.WEB" "0" "DNS and web health OK from $HN"; else warn "LOCAL.CLIENT.WEB" "0" "DNS/web health not fully OK from $HN"; fi
 
   if [ "$HN" = "sz-client-a1" ]; then
-    out="$(findmnt /mnt/projects; cat /mnt/projects/a1-nfs-ok.txt 2>/dev/null; smbclient -L //files.${A1_DOMAIN} -U amina%${A1_PASS} 2>&1 | grep projects || true)"
+    out="$(findmnt /mnt/projects; cat /mnt/projects/a1-nfs-ok.txt 2>&1 || su - amina -c 'cat /mnt/projects/a1-nfs-ok.txt' 2>&1; smbclient -L //files.${A1_DOMAIN} -U amina%${A1_PASS} 2>&1 | grep projects || true)"
     show_output "$out"
     echo "$out" | grep -q "A1_NFS_OK" && pass "A6.3" "0.50" "NFS persistent mount OK on sz-client" || fail "A6.3" "0.50" "NFS persistent mount missing on sz-client"
     echo "$out" | grep -q "projects" && pass "A6.6" "0.25" "Samba authenticated share visible from sz-client" || fail "A6.6" "0.25" "Samba share not visible from sz-client"
   fi
 
   if [ "$HN" = "sh-client-a1" ]; then
-    out="$(ls /net/projects 2>&1; cat /net/projects/a1-nfs-ok.txt 2>/dev/null)"
+    out="$(ls /net/projects 2>&1 || su - amina -c 'ls /net/projects' 2>&1; cat /net/projects/a1-nfs-ok.txt 2>&1 || su - amina -c 'cat /net/projects/a1-nfs-ok.txt' 2>&1)"
     show_output "$out"
     echo "$out" | grep -q "A1_NFS_OK" && pass "A6.4" "0.50" "NFS autofs OK on sh-client" || fail "A6.4" "0.50" "NFS autofs missing on sh-client"
   fi
