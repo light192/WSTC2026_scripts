@@ -18,6 +18,12 @@ cd A1_Evaluation_Scripts_Shanghai_Shenzhen
 sudo bash remote/a1-evaluate-remote.sh --report-dir /opt/grading/a1/eval-report
 ```
 
+По умолчанию evaluator делает паузу после каждого проверенного аспекта, чтобы эксперт мог прочитать команду, ожидаемый результат и фактический вывод. Для непрерывного запуска используйте:
+
+```bash
+sudo bash remote/a1-evaluate-remote.sh --no-pause --report-dir /opt/grading/a1/eval-report
+```
+
 Если проверка была остановлена, её можно продолжить с нужного критерия или подаспекта:
 
 ```bash

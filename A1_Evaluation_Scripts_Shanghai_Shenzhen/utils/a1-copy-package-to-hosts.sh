@@ -15,8 +15,8 @@ HOSTS=(
 
 for h in "${HOSTS[@]}"; do
   echo "Copying package to $h:/root/A1_Evaluation_Scripts_Shanghai_Shenzhen"
-  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$h" 'rm -rf /root/A1_Evaluation_Scripts_Shanghai_Shenzhen && mkdir -p /root/A1_Evaluation_Scripts_Shanghai_Shenzhen'
-  tar -C "$(dirname "$PWD")" -czf - "$(basename "$PWD")" | ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$h" 'tar -C /root -xzf -'
+  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$h" 'rm -rf /root/A1_Evaluation_Scripts_Shanghai_Shenzhen && mkdir -p /root/A1_Evaluation_Scripts_Shanghai_Shenzhen'
+  tar -C "$(dirname "$PWD")" -czf - "$(basename "$PWD")" | ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$h" 'tar -C /root -xzf -'
 done
 
 echo "Done."
