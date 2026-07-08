@@ -996,10 +996,10 @@ class C1Scorer:
             dev_bad = []
             cfg = self.run_config_include(
                 dev,
-                f"^hostname|^ip domain-name|^username {ADMIN_USER}|^enable secret",
+                f"^hostname|^ip domain|^username {ADMIN_USER}|^enable secret",
             )
             expected_hostname = re.search(rf"(?m)^hostname\s+{re.escape(dev)}\s*$", cfg)
-            domain = re.search(rf"(?m)^ip domain-name\s+{re.escape(DOMAIN_NAME)}\s*$", cfg)
+            domain = re.search(rf"(?m)^ip domain\s+{re.escape(DOMAIN_NAME)}\s*$", cfg)
             user = re.search(r"(?m)^username\s+admin\s+privilege\s+15\s+secret\b", cfg)
             secret = re.search(r"(?m)^enable\s+secret\b", cfg)
             if not (expected_hostname and domain and user and secret):
