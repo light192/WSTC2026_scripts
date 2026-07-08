@@ -45,6 +45,10 @@ ASK_DEVICE_LOGIN_INTERACTIVE = True
 # Таймаут ожидания данных от устройства (секунды) для всех recv()
 SOCKET_RECV_TIMEOUT = 20.0
 
+# IOS prompt at the end of command output, including config modes:
+# R1#, R1>, R1(config)#, R1(config-line)#, etc.
+IOS_PROMPT_RE = re.compile(r"(?m)(?:^|\r?\n)[^\r\n]+(?:\(config[^\)]*\))?[>#]\s*$")
+
 
 # ---------- утилиты вывода ----------
 
@@ -235,7 +239,7 @@ def _has_ios_prompt(text: str) -> bool:
     """Проверяет, что последний видимый фрагмент похож на IOS prompt."""
     if not text:
         return False
-    return bool(re.search(r"(?m)[\w().:/-]+[>#]\s*$", text))
+    return bool(IOS_PROMPT_RE.search(text))
 
 
 def enter_login_mode(sock: socket.socket,
@@ -401,6 +405,95 @@ def enter_enable_mode(sock: socket.socket,
     raise RuntimeError(f"Не удалось войти в enable для устройства{label}")
 
 
+def _read_until_prompt_or_idle(
+    sock: socket.socket,
+    timeout: float = SOCKET_RECV_TIMEOUT,
+    idle_timeout: float = 1.5,
+) -> str:
+    """
+    Читает вывод консоли до возврата IOS prompt или до устойчивого idle.
+
+    Старый код мог завершить чтение на первом коротком socket.timeout.
+    На загруженных IOSv/IOSvL2 `show running-config ...` иногда начинает
+    отдавать данные позже, и checker получал пустой вывод.
+    """
+    deadline = time.time() + timeout
+    chunks: list[str] = []
+    last_data_at: float | None = None
+
+    while time.time() < deadline:
+        remaining = max(0.05, deadline - time.time())
+        sock.settimeout(min(0.5, remaining))
+        try:
+            data = sock.recv(65535)
+        except socket.timeout:
+            if last_data_at is not None and (time.time() - last_data_at) >= idle_timeout:
+                break
+            continue
+        except OSError:
+            break
+
+        if not data:
+            break
+
+        chunks.append(data.decode(errors="ignore"))
+        last_data_at = time.time()
+        if _has_ios_prompt("".join(chunks)):
+            break
+
+    sock.settimeout(timeout)
+    return "".join(chunks)
+
+
+def _send_ios_command(
+    sock: socket.socket,
+    command: str,
+    timeout: float = SOCKET_RECV_TIMEOUT,
+    idle_timeout: float = 1.5,
+) -> str:
+    lines = command.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    if len(lines) == 1:
+        sock.sendall(command.encode() + b"\r\n")
+        return _read_until_prompt_or_idle(sock, timeout=timeout, idle_timeout=idle_timeout)
+
+    chunks: list[str] = []
+    for line in lines:
+        sock.sendall(line.encode() + b"\r\n")
+        chunks.append(_read_until_prompt_or_idle(sock, timeout=timeout, idle_timeout=idle_timeout))
+        time.sleep(0.05)
+    return "".join(chunks)
+
+
+def prepare_ios_console_session(
+    sock: socket.socket,
+    timeout: float = SOCKET_RECV_TIMEOUT,
+    device_label: str = "",
+) -> None:
+    """
+    Готовит IOS console к неинтерактивным проверкам.
+
+    - `exec-timeout 0 0` на line console 0 не даёт PNET-консоли отключаться
+      во время длинного прогона checker.
+    - terminal length/width отключают pager и переносы, которые ломают парсинг.
+
+    Команды не сохраняются в startup-config.
+    """
+    label = f" ({device_label})" if device_label else ""
+    try:
+        _send_ios_command(sock, "terminal length 0", timeout=timeout, idle_timeout=0.8)
+        _send_ios_command(sock, "terminal width 511", timeout=timeout, idle_timeout=0.8)
+        _send_ios_command(
+            sock,
+            "configure terminal\nline console 0\nexec-timeout 0 0\nend",
+            timeout=timeout,
+            idle_timeout=1.0,
+        )
+        _send_ios_command(sock, "terminal length 0", timeout=timeout, idle_timeout=0.8)
+        _send_ios_command(sock, "terminal width 511", timeout=timeout, idle_timeout=0.8)
+    except Exception as exc:
+        print(f"{YELLOW}[!] Не удалось подготовить консоль{label}: {exc}{NC}")
+
+
 class IOSConsoleSession:
     """Постоянная TCP-консоль IOS: login/enable один раз, затем много show-команд."""
 
@@ -427,21 +520,11 @@ class IOSConsoleSession:
     def _read_until_idle(self, idle_timeout: float = 1.0, max_wait: float | None = None) -> str:
         if self.sock is None:
             return ""
-        deadline = time.time() + (max_wait if max_wait is not None else self.timeout)
-        chunks: list[str] = []
-        self.sock.settimeout(idle_timeout)
-        while time.time() < deadline:
-            try:
-                data = self.sock.recv(65535)
-            except socket.timeout:
-                break
-            except OSError:
-                break
-            if not data:
-                break
-            chunks.append(data.decode(errors="ignore"))
-        self.sock.settimeout(self.timeout)
-        return "".join(chunks)
+        return _read_until_prompt_or_idle(
+            self.sock,
+            timeout=max_wait if max_wait is not None else self.timeout,
+            idle_timeout=idle_timeout,
+        )
 
     def connect(self) -> None:
         if self.connected:
@@ -469,14 +552,7 @@ class IOSConsoleSession:
             initial_text=initial_text,
         )
         enter_enable_mode(sock, self.enable_password, device_label=self.device_label)
-
-        sock.sendall(b"terminal length 0\r\n")
-        time.sleep(0.4)
-        self._read_until_idle(idle_timeout=0.4, max_wait=3.0)
-
-        sock.sendall(b"terminal width 0\r\n")
-        time.sleep(0.4)
-        self._read_until_idle(idle_timeout=0.4, max_wait=3.0)
+        prepare_ios_console_session(sock, timeout=self.timeout, device_label=self.device_label)
 
         self.connected = True
 
@@ -486,9 +562,25 @@ class IOSConsoleSession:
         if self.sock is None:
             raise RuntimeError(f"Нет TCP-сессии для {self.device_label}")
 
-        self.sock.sendall(command.encode() + b"\r\n")
-        time.sleep(0.4)
-        return self._read_until_idle(idle_timeout=1.0, max_wait=self.timeout)
+        # Сначала вычищаем возможный поздний syslog/эхо из канала.
+        self._read_until_idle(idle_timeout=0.2, max_wait=0.6)
+
+        raw = _send_ios_command(
+            self.sock,
+            command,
+            timeout=self.timeout,
+            idle_timeout=1.5,
+        )
+        if not raw.strip():
+            print(f"{YELLOW}[!] {self.device_label}: пустой вывод для '{command}', повторяю после подготовки консоли...{NC}")
+            prepare_ios_console_session(self.sock, timeout=self.timeout, device_label=self.device_label)
+            raw = _send_ios_command(
+                self.sock,
+                command,
+                timeout=self.timeout,
+                idle_timeout=2.0,
+            )
+        return raw
 
     def close(self) -> None:
         if self.sock is None:
@@ -552,38 +644,25 @@ def tcp_exec_ios_command(host: str,
 
     # нормальный вход в enable
     enter_enable_mode(s, enable_password, device_label=device_label)
+    prepare_ios_console_session(s, timeout=timeout, device_label=device_label)
 
-    # отключаем постраничный вывод, иначе длинные show-команды могут зависнуть на --More--
-    try:
-        s.sendall(b"terminal length 0\r\n")
-        time.sleep(0.5)
-        while True:
-            data = s.recv(4096)
-            if not data:
-                break
-            output_chunks.append(data.decode(errors="ignore"))
-            s.settimeout(0.2)
-    except socket.timeout:
-        pass
-    finally:
-        s.settimeout(timeout)
-
-    # основная команда
-    s.sendall(command.encode() + b"\r\n")
-    time.sleep(2)
-
-    while True:
-        try:
-            data = s.recv(4096)
-            if not data:
-                break
-            output_chunks.append(data.decode(errors="ignore"))
-            # вместо жёсткого 0.5 – та же константа
-            s.settimeout(SOCKET_RECV_TIMEOUT)
-        except socket.timeout:
-            break
-        except OSError:
-            break
+    # основная команда: читаем до возврата prompt, а не до первого idle timeout
+    raw_command_output = _send_ios_command(
+        s,
+        command,
+        timeout=timeout,
+        idle_timeout=1.5,
+    )
+    if not raw_command_output.strip():
+        print(f"{YELLOW}[!] {device_label}: пустой вывод для '{command}', повторяю после подготовки консоли...{NC}")
+        prepare_ios_console_session(s, timeout=timeout, device_label=device_label)
+        raw_command_output = _send_ios_command(
+            s,
+            command,
+            timeout=timeout,
+            idle_timeout=2.0,
+        )
+    output_chunks.append(raw_command_output)
 
     try:
         s.sendall(b"\r\nexit\r\n")
