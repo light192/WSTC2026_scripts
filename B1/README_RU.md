@@ -36,10 +36,10 @@ powershell -ExecutionPolicy Bypass -File .\local\b1-local-check.ps1
 - `hosts\check-INET-SRV01.ps1`
 - `hosts\check-INET-CL01.ps1`
 - `hosts\check-ISP-SHA01.ps1`
-- `hosts\check-ISP-BJ01.ps1`
+- `hosts\check-ISP-BJ.ps1`
 
 Аспекты `K1.01` и `K1.02` относятся к общей Internet-zone. Они доступны в
-локальных скриптах `INET-SRV01`, `INET-CL01`, `ISP-SHA01` и `ISP-BJ01`, чтобы
+локальных скриптах `INET-SRV01`, `INET-CL01`, `ISP-SHA01` и `ISP-BJ`, чтобы
 каждый из этих хостов можно было проверить локально.
 
 ## Продолжение с нужного аспекта

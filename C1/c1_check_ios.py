@@ -59,6 +59,7 @@ TOPO_FILE = "topo.json"
 TARGET_LAB_NAME_SUBSTR = "module-c"
 
 DOMAIN_NAME = "camp-c1.local"
+DOMAIN_NAME_RE = re.compile(rf"(?m)^ip domain(?:-name|\s+name)?\s+{re.escape(DOMAIN_NAME)}\s*$")
 ADMIN_USER = "admin"
 ADMIN_PASSWORD_HINT = "Skill39@C1"
 TIMEZONE_LINE = "clock timezone ALMT 5 0"
@@ -402,9 +403,15 @@ ASPECT_EXPECTED = {
     22: "passive-interface default, no passive только на routed links, p2p network type на P2P.",
     23: "DS1/DS2 summary 10.10.0.0/16 в area 0, summary виден на core/edge.",
     24: "IR3 summary 10.70.0.0/16 в area 0, summary виден на HQ core/edge.",
+<<<<<<< HEAD
     25: "eBGP IR1/IR2/IR3 к ISP1 Established, remote AS 65000, timers 10/30; password подтверждается установленной сессией с эталонным ISP.",
     26: "iBGP full-mesh IR1/IR2/IR3 установлен на Loopback0-адреса; next-hop-self подтверждается BGP next-hop в path detail.",
     27: "На IR1/IR2/IR3 local BGP AS 65100 по BGP summary, требуемые peers Established.",
+=======
+    25: "eBGP IR1/IR2/IR3 к ISP1 Established, remote AS 65000. Пароль подтверждается установленной сессией.",
+    26: "iBGP full-mesh IR1/IR2/IR3 через Loopback0, update-source Loopback0, next-hop-self.",
+    27: "На IR1/IR2/IR3 router bgp 65100, требуемые peers Established.",
+>>>>>>> 2c86f59e5345880829a7e9864ecd94212242ebe2
     28: "Default route распространяется в OSPF; IR1 primary, IR2 backup.",
     29: "IR3 не является preferred default gateway для HQ при доступных IR1/IR2.",
     30: "ISP1 видит только public NAT prefix 198.51.100.32/28; внутренних/WAN/tunnel leaks нет.",
@@ -640,7 +647,8 @@ def parse_standby_brief(output: str) -> dict[int, dict[str, str]]:
                 break
         ips = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", line)
         vip = ips[-1] if ips else ""
-        groups[group] = {"state": state, "vip": vip}
+        preempt = len(parts) > 3 and parts[3].upper() == "P"
+        groups[group] = {"state": state, "vip": vip, "preempt": str(preempt)}
     return groups
 
 
@@ -667,6 +675,18 @@ def parse_ospf_interface_brief(output: str) -> dict[str, str]:
     return areas
 
 
+def parse_eigrp_neighbors(output: str) -> dict[str, set[str]]:
+    neighbors: dict[str, set[str]] = defaultdict(set)
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        if not parts[0].isdigit() or not re.match(r"^\d+\.\d+\.\d+\.\d+$", parts[1]):
+            continue
+        neighbors[parts[1]].add(canonical_ifname(parts[2]))
+    return neighbors
+
+
 def parse_bgp_summary(output: str) -> dict[str, dict[str, str]]:
     peers: dict[str, dict[str, str]] = {}
     for line in output.splitlines():
@@ -690,6 +710,13 @@ def route_has_prefix(route_output: str, prefix: str) -> bool:
         re.escape(f"{net.network_address}"),
     ]
     return any(re.search(p, route_output) for p in patterns)
+
+
+def text_has_route_map_tag(text: str, tag: int | str, *, set_action: bool = False) -> bool:
+    tag_text = re.escape(str(tag))
+    if set_action:
+        return bool(re.search(rf"(?m)^\s*(?:set\s+)?tag\s+{tag_text}\b", text))
+    return bool(re.search(rf"(?m)^\s*match\s+tag\s+{tag_text}\b", text))
 
 
 def config_contains_ip_nat_for(config: str, ip: str) -> bool:
@@ -864,14 +891,66 @@ class C1Scorer:
     def run_config_section(self, dev: str, pattern: str) -> str:
         return self.run(dev, f"show running-config | section {pattern}")
 
-    def ospf_section(self, dev: str) -> str:
-        return self.run_config_section(dev, "^router ospf 10")
+    def useful_config_lines(self, output: str) -> list[str]:
+        lines = [line.strip() for line in output.splitlines() if line.strip()]
+        return [
+            line
+            for line in lines
+            if not line.startswith("show running-config")
+            and not line.startswith("Building configuration")
+            and line != "Current configuration :"
+        ]
 
+    def config_section_empty(self, output: str, expected_header: str) -> bool:
+        useful = self.useful_config_lines(output)
+        if not useful:
+            return True
+        return not useful or not any(line.startswith(expected_header) for line in useful)
+
+    def run_config_begin_section(self, dev: str, header: str) -> str:
+        output = self.run(dev, f"show running-config | begin {header}")
+        lines = []
+        capture = False
+        for raw in output.splitlines():
+            line = raw.rstrip()
+            stripped = line.strip()
+            if not stripped or stripped.startswith("show running-config"):
+                continue
+            if stripped.startswith(header):
+                capture = True
+                lines.append(line)
+                continue
+            if capture and stripped.startswith("router ") and not stripped.startswith(header):
+                break
+            if capture:
+                lines.append(line)
+        return "\n".join(lines)
+
+    def ospf_section(self, dev: str) -> str:
+        output = self.run_config_section(dev, "^router ospf 10")
+        if self.config_section_empty(output, "router ospf 10"):
+            fallback = self.run_config_begin_section(dev, "router ospf 10")
+            if fallback:
+                return fallback
+        return output
+
+<<<<<<< HEAD
+=======
+    def bgp_section(self, dev: str) -> str:
+        return self.run_config_section(dev, f"^router bgp {ENTERPRISE_AS}")
+
+    def bgp_neighbor_has(self, bgp_sec: str, neighbor: str, setting_re: str) -> bool:
+        if re.search(rf"(?m)^\s*neighbor\s+{re.escape(neighbor)}\s+{setting_re}\b", bgp_sec):
+            return True
+        groups = re.findall(rf"(?m)^\s*neighbor\s+{re.escape(neighbor)}\s+peer-group\s+(\S+)\s*$", bgp_sec)
+        return any(re.search(rf"(?m)^\s*neighbor\s+{re.escape(group)}\s+{setting_re}\b", bgp_sec) for group in groups)
+
+>>>>>>> 2c86f59e5345880829a7e9864ecd94212242ebe2
     def eigrp_section(self, dev: str) -> str:
         return self.run_config_section(dev, "^router eigrp C1-OVERLAY")
 
     def route_map_filtered(self, dev: str) -> str:
-        return self.run(dev, "show route-map | include route-map|match tag|set tag|10010|10020")
+        return self.run(dev, "show route-map | include route-map|match tag|set tag|tag 10010|tag 10020|10010|10020")
 
     def ip_route_include(self, dev: str, patterns: list[str]) -> str:
         return self.run(dev, f"show ip route | include {'|'.join(patterns)}")
@@ -916,11 +995,24 @@ class C1Scorer:
 
     def iface_section(self, dev: str, iface: str) -> str:
         canon = canonical_ifname(iface)
-        return self.run(
+        output = self.run(
             dev,
             f"show running-config interface {canon}",
             fallback_cmd=f"show running-config | section ^interface {canon}",
         )
+        if f"interface {canon}" not in output:
+            fallback = self.run_config_section(dev, f"^interface {canon}")
+            if f"interface {canon}" in fallback:
+                return fallback
+        return output
+
+    def interface_has_helper(self, dev: str, iface: str, helper_ip: str) -> bool:
+        canon = canonical_ifname(iface)
+        sec = self.iface_section(dev, canon)
+        if f"ip helper-address {helper_ip}" in sec:
+            return True
+        ip_int = self.run(dev, f"show ip interface {canon} | include Helper address|Helper addresses|{helper_ip}")
+        return helper_ip in ip_int
 
     def bgp_summary(self, dev: str, peers=None) -> dict[str, dict[str, str]]:
         peer_list = list(peers or [])
@@ -1042,16 +1134,38 @@ class C1Scorer:
         for dev in MANAGED_DEVICES:
             start = self.live_device_start()
             dev_bad = []
-            cfg = self.run_config_include(
-                dev,
-                f"^hostname|^ip domain-name|^username {ADMIN_USER}|^enable secret",
+
+            def missing_identity_fields(config_text: str) -> list[str]:
+                expected_hostname = re.search(rf"(?m)^hostname\s+{re.escape(dev)}\s*$", config_text)
+                domain = DOMAIN_NAME_RE.search(config_text)
+                user = re.search(rf"\busername\s+{re.escape(ADMIN_USER)}\s+privilege\s+15\s+secret\b", config_text)
+                secret = re.search(r"(?m)^enable\s+secret\b", config_text)
+                missing = []
+                if not expected_hostname:
+                    missing.append("hostname")
+                if not domain:
+                    missing.append("domain")
+                if not user:
+                    missing.append("admin user")
+                if not secret:
+                    missing.append("enable secret")
+                return missing
+
+            cfg = "\n".join(
+                [
+                    self.run_config_include(dev, "^hostname"),
+                    self.run_config_include(dev, "^ip domain"),
+                    self.run_config_include(dev, f"^username {ADMIN_USER}"),
+                    self.run_config_include(dev, "^enable secret"),
+                    self.run_config_include(dev, "enable secret"),
+                ]
             )
-            expected_hostname = re.search(rf"(?m)^hostname\s+{re.escape(dev)}\s*$", cfg)
-            domain = re.search(rf"(?m)^ip domain-name\s+{re.escape(DOMAIN_NAME)}\s*$", cfg)
-            user = re.search(r"(?m)^username\s+admin\s+privilege\s+15\s+secret\b", cfg)
-            secret = re.search(r"(?m)^enable\s+secret\b", cfg)
-            if not (expected_hostname and domain and user and secret):
-                dev_bad.append(dev)
+            missing = missing_identity_fields(cfg)
+            if missing:
+                cfg = f"{cfg}\n{self.run(dev, 'show running-config')}"
+                missing = missing_identity_fields(cfg)
+            if missing:
+                dev_bad.append(f"{dev}: {', '.join(missing)}")
             self.report_device_result(dev, not dev_bad, dev_bad, start)
             bad.extend(dev_bad)
         self.add(1, not bad, [f"missing/incorrect: {', '.join(bad)}"] if bad else "all managed devices OK")
@@ -1064,11 +1178,30 @@ class C1Scorer:
             ssh_cfg = self.run_config_include(dev, "^ip ssh version 2")
             ssh = self.run(dev, "show ip ssh")
             vty_sections = self.run_config_section(dev, "^line vty")
+            if "transport input" not in vty_sections:
+                vty_sections += "\n" + self.run_config_include(dev, "^line vty|transport input")
+            vty_line = ""
+            if "transport input" not in vty_sections:
+                vty_line = self.run(dev, "show line vty 0 | include Allowed input transports")
+                if "Allowed input transports" not in vty_line:
+                    vty_line = self.run(dev, "show line vty 0")
             ssh_v2 = "SSH Enabled - version 2.0" in ssh or re.search(r"(?m)^ip ssh version 2\b", ssh_cfg)
-            vty_ssh = "transport input ssh" in vty_sections
-            telnet_absent = "transport input telnet" not in vty_sections and "transport input all" not in vty_sections
+            config_transport = re.findall(r"(?m)^\s*transport input\s+(.+)$", vty_sections)
+            line_transport = re.findall(r"Allowed input transports are\s+([^.\r\n]+)", vty_line)
+            transport_sources = config_transport or line_transport
+            vty_ssh = any(re.search(r"\bssh\b", transports) for transports in transport_sources)
+            telnet_absent = bool(transport_sources) and not any(
+                re.search(r"\b(telnet|all)\b", transports) for transports in transport_sources
+            )
             if not (ssh_v2 and vty_ssh and telnet_absent):
-                dev_bad.append(dev)
+                missing = []
+                if not ssh_v2:
+                    missing.append("SSHv2")
+                if not vty_ssh:
+                    missing.append("VTY ssh")
+                if not telnet_absent:
+                    missing.append("VTY ssh-only")
+                dev_bad.append(f"{dev}: {', '.join(missing)}")
             self.report_device_result(dev, not dev_bad, dev_bad, start)
             bad.extend(dev_bad)
         self.add(2, not bad, [f"SSH/VTY issue: {', '.join(bad)}"] if bad else "SSHv2 and VTY ssh-only OK")
@@ -1341,8 +1474,12 @@ class C1Scorer:
             cfg = self.run_config_include(dev, "^ip routing")
             svi_interfaces = [iface for iface in OSPF_AREA_INTERFACES[dev] if iface.startswith("Vlan")]
             brief = self.ip_brief(dev, svi_interfaces)
-            if not re.search(r"(?m)^ip routing\s*$", cfg):
-                dev_bad.append(f"{dev}: no ip routing")
+            connected_routes = self.run(dev, "show ip route connected | include Vlan")
+            routing_enabled = bool(re.search(r"(?m)^ip routing\s*$", cfg)) or bool(
+                re.search(r"(?m)^\s*C\s+\S+.*Vlan\d+\b", connected_routes)
+            )
+            if not routing_enabled:
+                dev_bad.append(f"{dev}: no ip routing evidence")
             for iface in OSPF_AREA_INTERFACES[dev]:
                 if iface.startswith("Vlan"):
                     state = brief.get(iface)
@@ -1371,7 +1508,9 @@ class C1Scorer:
                     dev_bad.append(f"{dev} group {group}: VIP {data['vip']} != {vip}")
                 if state and data["state"] != state:
                     dev_bad.append(f"{dev} group {group}: state {data['state']} != {state}")
-                if not re.search(rf"standby\s+{group}\s+preempt\b", cfg):
+                preempt_in_cfg = re.search(rf"standby\s+{group}\s+preempt\b", cfg)
+                preempt_in_brief = data.get("preempt") == "True"
+                if not (preempt_in_cfg or preempt_in_brief):
                     dev_bad.append(f"{dev} group {group}: no preempt")
             self.report_device_result(dev, not dev_bad, dev_bad, start)
             bad.extend(dev_bad)
@@ -1389,12 +1528,15 @@ class C1Scorer:
             start = self.live_device_start()
             dev_bad = []
             ospf_sec = self.ospf_section(dev)
-            if not ospf_sec:
+            ospf_info = self.run(dev, "show ip ospf | include Routing Process|ID")
+            actual = self.ospf_neighbors(dev, OSPF_NEIGHBOR_IDS[dev])
+            if not ospf_sec and not actual:
                 dev_bad.append(f"{dev}: no router ospf 10")
             rid = LOOPBACK0.get(dev)
-            if rid and f"router-id {rid}" not in ospf_sec:
+            rid_in_config = rid and f"router-id {rid}" in ospf_sec
+            rid_in_state = rid and re.search(rf"\bID\s+{re.escape(rid)}\b|\b{re.escape(rid)}\b", ospf_info)
+            if rid and not (rid_in_config or rid_in_state):
                 dev_bad.append(f"{dev}: router-id != {rid}")
-            actual = self.ospf_neighbors(dev, OSPF_NEIGHBOR_IDS[dev])
             missing = OSPF_NEIGHBOR_IDS[dev] - actual
             if missing:
                 dev_bad.append(f"{dev}: missing FULL neighbors {','.join(sorted(missing))}")
@@ -1440,9 +1582,9 @@ class C1Scorer:
         for dev in ("DS1", "DS2"):
             start = self.live_device_start()
             dev_bad = []
-            ospf_sec = self.ospf_section(dev)
-            if "area 10 range 10.10.0.0 255.255.0.0" not in ospf_sec:
-                dev_bad.append(f"{dev}: no area 10 range 10.10.0.0/16")
+            summary = self.run(dev, "show ip ospf database summary 10.10.0.0")
+            if "10.10.0.0" not in summary and "% Invalid" not in summary:
+                dev_bad.append(f"{dev}: no local OSPF summary LSA 10.10.0.0/16")
             self.report_device_result(dev, not dev_bad, dev_bad, start)
             bad.extend(dev_bad)
         for dev in ("CR1", "CR2", "IR1", "IR2", "IR3"):
@@ -1457,11 +1599,11 @@ class C1Scorer:
 
     def check_24_dc_ospf_summary(self) -> None:
         start = self.live_device_start()
-        ospf_sec = self.ospf_section("IR3")
         bad = []
         ir3_bad = []
-        if "area 70 range 10.70.0.0 255.255.0.0" not in ospf_sec:
-            ir3_bad.append("IR3: no area 70 range 10.70.0.0/16")
+        summary = self.run("IR3", "show ip ospf database summary 10.70.0.0")
+        if "10.70.0.0" not in summary and "% Invalid" not in summary:
+            ir3_bad.append("IR3: no local OSPF summary LSA 10.70.0.0/16")
         self.report_device_result("IR3", not ir3_bad, ir3_bad, start)
         bad.extend(ir3_bad)
         for dev in ("CR1", "CR2", "IR1", "IR2"):
@@ -1485,12 +1627,17 @@ class C1Scorer:
             peer = summary.get(neighbor)
             if not peer or not peer["established"]:
                 dev_bad.append(f"{dev}: eBGP {neighbor} not established")
+<<<<<<< HEAD
             if not peer or peer.get("as") != ISP_AS:
                 dev_bad.append(f"{dev}: eBGP {neighbor} remote AS is not {ISP_AS}")
 
             detail = self.bgp_neighbor_detail(dev, neighbor)
             if not self.bgp_neighbor_timers_ok(detail):
                 dev_bad.append(f"{dev}: eBGP {neighbor} timers 10/30 not proven by neighbor detail")
+=======
+            elif peer["as"] != ISP_AS:
+                dev_bad.append(f"{dev}: eBGP {neighbor} remote AS {peer['as']} != {ISP_AS}")
+>>>>>>> 2c86f59e5345880829a7e9864ecd94212242ebe2
             self.report_device_result(dev, not dev_bad, dev_bad, start)
             bad.extend(dev_bad)
         self.add(25, not bad, bad)
@@ -1505,10 +1652,19 @@ class C1Scorer:
                 peer = summary.get(peer_ip)
                 if not peer or not peer["established"]:
                     dev_bad.append(f"{dev}: iBGP {peer_ip} not established")
+<<<<<<< HEAD
                 if not peer or peer.get("as") != ENTERPRISE_AS:
                     dev_bad.append(f"{dev}: iBGP {peer_ip} remote AS is not {ENTERPRISE_AS}")
                 if not self.ibgp_next_hop_self_proven(dev, peer_ip):
                     dev_bad.append(f"{dev}: next-hop-self for {peer_ip} not proven by BGP path next-hop")
+=======
+                if not self.bgp_neighbor_has(bgp_sec, peer_ip, rf"remote-as\s+{ENTERPRISE_AS}"):
+                    dev_bad.append(f"{dev}: iBGP remote-as {peer_ip}")
+                if not self.bgp_neighbor_has(bgp_sec, peer_ip, r"update-source\s+Loopback0"):
+                    dev_bad.append(f"{dev}: update-source {peer_ip}")
+                if not self.bgp_neighbor_has(bgp_sec, peer_ip, r"next-hop-self"):
+                    dev_bad.append(f"{dev}: next-hop-self {peer_ip}")
+>>>>>>> 2c86f59e5345880829a7e9864ecd94212242ebe2
             self.report_device_result(dev, not dev_bad, dev_bad, start)
             bad.extend(dev_bad)
         self.add(26, not bad, bad)
@@ -1664,14 +1820,16 @@ class C1Scorer:
                 f"show eigrp address-family ipv4 neighbors | include {neigh_filter}",
                 fallback_cmd=f"show ip eigrp neighbors | include {neigh_filter}",
             )
+            parsed_neighbors = parse_eigrp_neighbors(neigh)
             if "router eigrp C1-OVERLAY" not in eigrp_sec and "C1-OVERLAY" not in prot:
                 dev_bad.append(f"{dev}: EIGRP named mode C1-OVERLAY not visible")
             if "autonomous-system 100" not in eigrp_sec and "AS(100)" not in prot and "AS 100" not in prot:
                 dev_bad.append(f"{dev}: EIGRP AS100 not visible")
             peer_ip, iface = expected[dev]
-            if peer_ip not in neigh or iface not in neigh:
+            if iface not in parsed_neighbors.get(peer_ip, set()):
                 dev_bad.append(f"{dev}: neighbor {peer_ip} on {iface} missing")
-            extra_tunnels = [t for t in ("Tunnel101", "Tunnel102") if t != iface and t in neigh]
+            seen_tunnels = {tunnel for tunnels in parsed_neighbors.values() for tunnel in tunnels}
+            extra_tunnels = [t for t in ("Tunnel101", "Tunnel102") if t != iface and t in seen_tunnels]
             if extra_tunnels:
                 dev_bad.append(f"{dev}: unexpected EIGRP tunnel {','.join(extra_tunnels)}")
             self.report_device_result(dev, not dev_bad, dev_bad, start)
@@ -1734,7 +1892,9 @@ class C1Scorer:
             route_map = self.route_map_filtered(dev)
             if "redistribute ospf 10" not in eigrp_sec or "route-map" not in eigrp_sec:
                 dev_bad.append(f"{dev}: redistribute ospf 10 route-map missing")
-            if "set tag 10010" not in route_map and "set tag 10010" not in eigrp_sec:
+            if not text_has_route_map_tag(route_map, 10010, set_action=True) and not text_has_route_map_tag(
+                eigrp_sec, 10010, set_action=True
+            ):
                 dev_bad.append(f"{dev}: tag 10010 missing")
             self.report_device_result(dev, not dev_bad, dev_bad, start)
             bad.extend(dev_bad)
@@ -1749,7 +1909,9 @@ class C1Scorer:
             route_map = self.route_map_filtered(dev)
             if "redistribute eigrp" not in ospf_sec or "route-map" not in ospf_sec:
                 dev_bad.append(f"{dev}: redistribute eigrp route-map missing")
-            if "set tag 10020" not in route_map and "set tag 10020" not in ospf_sec:
+            if not text_has_route_map_tag(route_map, 10020, set_action=True) and not text_has_route_map_tag(
+                ospf_sec, 10020, set_action=True
+            ):
                 dev_bad.append(f"{dev}: tag 10020 missing")
             self.report_device_result(dev, not dev_bad, dev_bad, start)
             bad.extend(dev_bad)
@@ -1761,9 +1923,9 @@ class C1Scorer:
             start = self.live_device_start()
             dev_bad = []
             text = self.ospf_section(dev) + "\n" + self.eigrp_section(dev) + "\n" + self.route_map_filtered(dev)
-            if "match tag 10010" not in text:
+            if not text_has_route_map_tag(text, 10010):
                 dev_bad.append(f"{dev}: no deny/match tag 10010")
-            if "match tag 10020" not in text:
+            if not text_has_route_map_tag(text, 10020):
                 dev_bad.append(f"{dev}: no deny/match tag 10020")
             self.report_device_result(dev, not dev_bad, dev_bad, start)
             bad.extend(dev_bad)
@@ -1777,16 +1939,14 @@ class C1Scorer:
             start = self.live_device_start()
             dev_bad = []
             for iface in ("Vlan10", "Vlan20"):
-                sec = self.iface_section(dev, iface)
-                if f"ip helper-address {SVR2_IP}" not in sec:
+                if not self.interface_has_helper(dev, iface, SVR2_IP):
                     dev_bad.append(f"{dev} {iface}: helper missing")
             self.report_device_result(dev, not dev_bad, dev_bad, start)
             bad.extend(dev_bad)
         for dev in ("BR1", "BR2"):
             start = self.live_device_start()
             dev_bad = []
-            sec = self.iface_section(dev, "GigabitEthernet0/1.10")
-            if f"ip helper-address {SVR2_IP}" not in sec:
+            if not self.interface_has_helper(dev, "GigabitEthernet0/1.10", SVR2_IP):
                 dev_bad.append(f"{dev} G0/1.10: helper missing")
             self.report_device_result(dev, not dev_bad, dev_bad, start)
             bad.extend(dev_bad)

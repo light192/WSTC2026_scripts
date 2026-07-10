@@ -11,4 +11,4 @@ $requestedNoPause = $NoPause
 $requestedStartFromAspect = $StartFromAspect
 
 . (Join-Path $PSScriptRoot '..\common\b1-common.ps1')
-Invoke-B1HostChecks -HostKey 'ISP-BJ01' -Report:$requestedReport -ReportDir $requestedReportDir -NoPause:$requestedNoPause -StartFromAspect $requestedStartFromAspect
+Invoke-B1HostChecks -HostKey 'ISP-BJ' -Report:$requestedReport -ReportDir $requestedReportDir -NoPause:$requestedNoPause -StartFromAspect $requestedStartFromAspect
