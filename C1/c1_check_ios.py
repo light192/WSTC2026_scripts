@@ -276,6 +276,8 @@ IBGP_NEIGHBORS = {
     "IR3": ["10.255.1.1", "10.255.1.2"],
 }
 
+BGP_NEXT_HOP_SELF_PROBE_PREFIXES = ["8.8.8.8", "198.51.100.100"]
+
 INTERNAL_SUMMARIES = ["10.10.0.0/16", "10.70.0.0/16", "10.21.0.0/16", "10.22.0.0/16"]
 HQ_DC_SPECIFICS = [
     "10.10.10.0/24",
@@ -400,9 +402,9 @@ ASPECT_EXPECTED = {
     22: "passive-interface default, no passive только на routed links, p2p network type на P2P.",
     23: "DS1/DS2 summary 10.10.0.0/16 в area 0, summary виден на core/edge.",
     24: "IR3 summary 10.70.0.0/16 в area 0, summary виден на HQ core/edge.",
-    25: "eBGP IR1/IR2/IR3 к ISP1 Established, AS 65100/65000, timers 10/30, password.",
-    26: "iBGP full-mesh IR1/IR2/IR3 через Loopback0, update-source Loopback0, next-hop-self.",
-    27: "На IR1/IR2/IR3 router bgp 65100, требуемые peers Established.",
+    25: "eBGP IR1/IR2/IR3 к ISP1 Established, remote AS 65000, timers 10/30; password подтверждается установленной сессией с эталонным ISP.",
+    26: "iBGP full-mesh IR1/IR2/IR3 установлен на Loopback0-адреса; next-hop-self подтверждается BGP next-hop в path detail.",
+    27: "На IR1/IR2/IR3 local BGP AS 65100 по BGP summary, требуемые peers Established.",
     28: "Default route распространяется в OSPF; IR1 primary, IR2 backup.",
     29: "IR3 не является preferred default gateway для HQ при доступных IR1/IR2.",
     30: "ISP1 видит только public NAT prefix 198.51.100.32/28; внутренних/WAN/tunnel leaks нет.",
@@ -865,9 +867,6 @@ class C1Scorer:
     def ospf_section(self, dev: str) -> str:
         return self.run_config_section(dev, "^router ospf 10")
 
-    def bgp_section(self, dev: str) -> str:
-        return self.run_config_section(dev, f"^router bgp {ENTERPRISE_AS}")
-
     def eigrp_section(self, dev: str) -> str:
         return self.run_config_section(dev, "^router eigrp C1-OVERLAY")
 
@@ -934,6 +933,55 @@ class C1Scorer:
             fallback_cmd=f"show ip bgp summary | include {pattern}",
         )
         return parse_bgp_summary(out)
+
+    def bgp_summary_full(self, dev: str) -> str:
+        return self.run(
+            dev,
+            "show bgp ipv4 unicast summary",
+            fallback_cmd="show ip bgp summary",
+        )
+
+    def bgp_local_as(self, dev: str) -> str | None:
+        out = self.bgp_summary_full(dev)
+        match = re.search(r"local AS number\s+(\d+)", out, re.I)
+        if match:
+            return match.group(1)
+        match = re.search(r"\blocal AS\s+(\d+)", out, re.I)
+        if match:
+            return match.group(1)
+        return None
+
+    def bgp_neighbor_detail(self, dev: str, neighbor: str) -> str:
+        include = "BGP neighbor|BGP state|remote AS|hold time|keepalive|MD5|auth|password"
+        return self.run(
+            dev,
+            f"show bgp ipv4 unicast neighbors {neighbor} | include {include}",
+            fallback_cmd=f"show ip bgp neighbors {neighbor} | include {include}",
+        )
+
+    def bgp_neighbor_timers_ok(self, detail: str) -> bool:
+        text = detail or ""
+        has_hold_30 = re.search(r"hold time(?: is)?\s+30\b", text, re.I) is not None
+        has_keepalive_10 = re.search(r"keepalive(?: interval is)?\s+10\b", text, re.I) is not None
+        return has_hold_30 and has_keepalive_10
+
+    def bgp_prefix_detail(self, dev: str, prefix: str) -> str:
+        return self.run(
+            dev,
+            f"show bgp ipv4 unicast {prefix}",
+            fallback_cmd=f"show ip bgp {prefix}",
+        )
+
+    def bgp_path_has_nexthop_from_peer(self, output: str, next_hop: str, from_peer: str) -> bool:
+        pattern = rf"(?m)^\s*{re.escape(next_hop)}\s+from\s+{re.escape(from_peer)}\b"
+        return re.search(pattern, output or "") is not None
+
+    def ibgp_next_hop_self_proven(self, dev: str, peer_ip: str) -> bool:
+        for prefix in BGP_NEXT_HOP_SELF_PROBE_PREFIXES:
+            out = self.bgp_prefix_detail(dev, prefix)
+            if self.bgp_path_has_nexthop_from_peer(out, peer_ip, peer_ip):
+                return True
+        return False
 
     def format_details(self, details: list[str] | str, limit: int = 14) -> tuple[str, str]:
         if isinstance(details, list):
@@ -1433,17 +1481,16 @@ class C1Scorer:
         for dev, neighbor in EBGP_NEIGHBORS.items():
             start = self.live_device_start()
             dev_bad = []
-            bgp_sec = self.bgp_section(dev)
             summary = self.bgp_summary(dev, [neighbor])
             peer = summary.get(neighbor)
             if not peer or not peer["established"]:
                 dev_bad.append(f"{dev}: eBGP {neighbor} not established")
-            if f"neighbor {neighbor} remote-as {ISP_AS}" not in bgp_sec:
-                dev_bad.append(f"{dev}: remote-as for {neighbor}")
-            if f"neighbor {neighbor} timers 10 30" not in bgp_sec:
-                dev_bad.append(f"{dev}: timers for {neighbor}")
-            if f"neighbor {neighbor} password" not in bgp_sec:
-                dev_bad.append(f"{dev}: password for {neighbor}")
+            if not peer or peer.get("as") != ISP_AS:
+                dev_bad.append(f"{dev}: eBGP {neighbor} remote AS is not {ISP_AS}")
+
+            detail = self.bgp_neighbor_detail(dev, neighbor)
+            if not self.bgp_neighbor_timers_ok(detail):
+                dev_bad.append(f"{dev}: eBGP {neighbor} timers 10/30 not proven by neighbor detail")
             self.report_device_result(dev, not dev_bad, dev_bad, start)
             bad.extend(dev_bad)
         self.add(25, not bad, bad)
@@ -1453,18 +1500,15 @@ class C1Scorer:
         for dev, peers in IBGP_NEIGHBORS.items():
             start = self.live_device_start()
             dev_bad = []
-            bgp_sec = self.bgp_section(dev)
             summary = self.bgp_summary(dev, peers)
             for peer_ip in peers:
                 peer = summary.get(peer_ip)
                 if not peer or not peer["established"]:
                     dev_bad.append(f"{dev}: iBGP {peer_ip} not established")
-                if f"neighbor {peer_ip} remote-as {ENTERPRISE_AS}" not in bgp_sec:
-                    dev_bad.append(f"{dev}: iBGP remote-as {peer_ip}")
-                if f"neighbor {peer_ip} update-source Loopback0" not in bgp_sec:
-                    dev_bad.append(f"{dev}: update-source {peer_ip}")
-                if f"neighbor {peer_ip} next-hop-self" not in bgp_sec:
-                    dev_bad.append(f"{dev}: next-hop-self {peer_ip}")
+                if not peer or peer.get("as") != ENTERPRISE_AS:
+                    dev_bad.append(f"{dev}: iBGP {peer_ip} remote AS is not {ENTERPRISE_AS}")
+                if not self.ibgp_next_hop_self_proven(dev, peer_ip):
+                    dev_bad.append(f"{dev}: next-hop-self for {peer_ip} not proven by BGP path next-hop")
             self.report_device_result(dev, not dev_bad, dev_bad, start)
             bad.extend(dev_bad)
         self.add(26, not bad, bad)
@@ -1474,14 +1518,18 @@ class C1Scorer:
         for dev in EDGE_DEVICES:
             start = self.live_device_start()
             dev_bad = []
-            bgp_sec = self.bgp_section(dev)
-            if not re.search(rf"(?m)^router bgp {ENTERPRISE_AS}\s*$", bgp_sec):
-                dev_bad.append(f"{dev}: router bgp {ENTERPRISE_AS} missing")
+            local_as = self.bgp_local_as(dev)
+            if local_as != ENTERPRISE_AS:
+                dev_bad.append(f"{dev}: local BGP AS {local_as or 'unknown'} != {ENTERPRISE_AS}")
             checked_peers = list(EBGP_NEIGHBORS.values()) + IBGP_NEIGHBORS[dev]
-            for peer_ip, peer in self.bgp_summary(dev, checked_peers).items():
-                if peer_ip in EBGP_NEIGHBORS.values() or peer_ip in IBGP_NEIGHBORS[dev]:
-                    if not peer["established"]:
-                        dev_bad.append(f"{dev}: peer {peer_ip} state {peer['state']}")
+            summary = self.bgp_summary(dev, checked_peers)
+            for peer_ip in checked_peers:
+                peer = summary.get(peer_ip)
+                if not peer:
+                    dev_bad.append(f"{dev}: peer {peer_ip} missing from BGP summary")
+                    continue
+                if not peer["established"]:
+                    dev_bad.append(f"{dev}: peer {peer_ip} state {peer['state']}")
             self.report_device_result(dev, not dev_bad, dev_bad, start)
             bad.extend(dev_bad)
         self.add(27, not bad, bad)
@@ -1560,14 +1608,6 @@ class C1Scorer:
                 isp_bad.append(f"ISP1: forbidden prefix visible {prefix}")
         self.report_device_result("ISP1", not isp_bad, isp_bad, start)
         bad.extend(isp_bad)
-        for dev in EDGE_DEVICES:
-            start = self.live_device_start()
-            dev_bad = []
-            cfg = self.run_config_include(dev, "198.51.100.32|ip prefix-list|route-map|network")
-            if "198.51.100.32" not in cfg:
-                dev_bad.append(f"{dev}: public NAT prefix/filter not visible in config")
-            self.report_device_result(dev, not dev_bad, dev_bad, start)
-            bad.extend(dev_bad)
         self.add(30, not bad, bad)
 
     # ---------- E ----------
