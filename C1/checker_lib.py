@@ -494,6 +494,19 @@ def prepare_ios_console_session(
         print(f"{YELLOW}[!] Не удалось подготовить консоль{label}: {exc}{NC}")
 
 
+def verify_ios_prompt(
+    sock: socket.socket,
+    timeout: float = SOCKET_RECV_TIMEOUT,
+    device_label: str = "",
+) -> str:
+    label = f" [{device_label}]" if device_label else ""
+    sock.sendall(b"\r\n")
+    prompt_output = _read_until_prompt_or_idle(sock, timeout=min(timeout, 5.0), idle_timeout=1.0)
+    if not _has_ios_prompt(prompt_output):
+        raise RuntimeError(f"Не получено приглашение IOS prompt для устройства{label}")
+    return prompt_output
+
+
 class IOSConsoleSession:
     """Постоянная TCP-консоль IOS: login/enable один раз, затем много show-команд."""
 
@@ -553,6 +566,7 @@ class IOSConsoleSession:
         )
         enter_enable_mode(sock, self.enable_password, device_label=self.device_label)
         prepare_ios_console_session(sock, timeout=self.timeout, device_label=self.device_label)
+        verify_ios_prompt(sock, timeout=self.timeout, device_label=self.device_label)
 
         self.connected = True
 
@@ -565,20 +579,56 @@ class IOSConsoleSession:
         # Сначала вычищаем возможный поздний syslog/эхо из канала.
         self._read_until_idle(idle_timeout=0.2, max_wait=0.6)
 
+        long_show_run = command.strip().startswith("show running-config")
+        command_timeout = max(self.timeout, 60.0) if long_show_run else self.timeout
+        command_idle = 4.0 if long_show_run else 1.5
+
+        def incomplete_output(text: str) -> bool:
+            if not text.strip():
+                return True
+            if re.search(r"(?m)^\S+#show\s*$", text) or "terminal width 511" in text or "inal width 511" in text:
+                return True
+            if not long_show_run:
+                return False
+            command_text = command.strip()
+            if command_text == "show running-config":
+                return "Building configuration" in text and "hostname" not in text
+            match = re.match(r"show running-config interface\s+(\S+)", command_text)
+            if match:
+                return f"interface {match.group(1)}" not in text
+            match = re.search(r"\|\s*section\s+\^interface\s+(\S+)", command_text)
+            if match:
+                return f"interface {match.group(1)}" not in text
+            return False
+
         raw = _send_ios_command(
             self.sock,
             command,
-            timeout=self.timeout,
-            idle_timeout=1.5,
+            timeout=command_timeout,
+            idle_timeout=command_idle,
         )
-        if not raw.strip():
+        if incomplete_output(raw):
             print(f"{YELLOW}[!] {self.device_label}: пустой вывод для '{command}', повторяю после подготовки консоли...{NC}")
             prepare_ios_console_session(self.sock, timeout=self.timeout, device_label=self.device_label)
+            self._read_until_idle(idle_timeout=0.2, max_wait=0.8)
             raw = _send_ios_command(
                 self.sock,
                 command,
-                timeout=self.timeout,
-                idle_timeout=2.0,
+                timeout=command_timeout,
+                idle_timeout=max(command_idle, 2.0),
+            )
+        if incomplete_output(raw):
+            print(f"{YELLOW}[!] {self.device_label}: console output is still incomplete, reconnecting...{NC}")
+            self.close()
+            self.connect()
+            if self.sock is None:
+                return raw
+            self._read_until_idle(idle_timeout=0.2, max_wait=0.6)
+            raw = _send_ios_command(
+                self.sock,
+                command,
+                timeout=command_timeout,
+                idle_timeout=max(command_idle, 2.0),
             )
         return raw
 
@@ -645,22 +695,46 @@ def tcp_exec_ios_command(host: str,
     # нормальный вход в enable
     enter_enable_mode(s, enable_password, device_label=device_label)
     prepare_ios_console_session(s, timeout=timeout, device_label=device_label)
+    verify_ios_prompt(s, timeout=timeout, device_label=device_label)
 
     # основная команда: читаем до возврата prompt, а не до первого idle timeout
+    long_show_run = command.strip().startswith("show running-config")
+    command_timeout = max(timeout, 60.0) if long_show_run else timeout
+    command_idle = 4.0 if long_show_run else 1.5
+
+    def incomplete_command_output(text: str) -> bool:
+        if not text.strip():
+            return True
+        if re.search(r"(?m)^\S+#show\s*$", text) or "terminal width 511" in text or "inal width 511" in text:
+            return True
+        if not long_show_run:
+            return False
+        command_text = command.strip()
+        if command_text == "show running-config":
+            return "Building configuration" in text and "hostname" not in text
+        match = re.match(r"show running-config interface\s+(\S+)", command_text)
+        if match:
+            return f"interface {match.group(1)}" not in text
+        match = re.search(r"\|\s*section\s+\^interface\s+(\S+)", command_text)
+        if match:
+            return f"interface {match.group(1)}" not in text
+        return False
+
     raw_command_output = _send_ios_command(
         s,
         command,
-        timeout=timeout,
-        idle_timeout=1.5,
+        timeout=command_timeout,
+        idle_timeout=command_idle,
     )
-    if not raw_command_output.strip():
+    if incomplete_command_output(raw_command_output):
         print(f"{YELLOW}[!] {device_label}: пустой вывод для '{command}', повторяю после подготовки консоли...{NC}")
         prepare_ios_console_session(s, timeout=timeout, device_label=device_label)
+        _read_until_prompt_or_idle(s, timeout=min(timeout, 2.0), idle_timeout=0.2)
         raw_command_output = _send_ios_command(
             s,
             command,
-            timeout=timeout,
-            idle_timeout=2.0,
+            timeout=command_timeout,
+            idle_timeout=max(command_idle, 2.0),
         )
     output_chunks.append(raw_command_output)
 
