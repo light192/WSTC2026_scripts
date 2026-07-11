@@ -10,6 +10,7 @@ $script:SummaryPath = Join-Path $script:ReportDir 'b1-summary.txt'
 $script:PauseBetweenChecks = $true
 $script:B1ReportEnabled = $false
 $script:B1ResultRows = @()
+$script:B1CheckerVersion = '2026-07-11.14'
 
 function Test-B1LengthOnlyText {
     param([string]$Text)
@@ -72,7 +73,20 @@ function ConvertTo-B1Text {
     $lines = New-Object System.Collections.Generic.List[string]
     Add-B1TextItem -Value $Value -Lines $lines
     $result = (($lines -join [Environment]::NewLine).TrimEnd())
-    if (Test-B1LengthOnlyText $result) { return '(вывод команды получен PowerShell как объекты Length; обновленное выполнение native-команд должно вернуть обычный текст)' }
+    if (Test-B1LengthOnlyText $result) {
+        $fallbackLines = New-Object System.Collections.Generic.List[string]
+        foreach ($item in @($Value)) {
+            if ($null -eq $item) { continue }
+            $text = ([string]$item.PSObject.BaseObject).TrimEnd()
+            if (-not [string]::IsNullOrWhiteSpace($text) -and -not (Test-B1LengthOnlyText $text)) {
+                $fallbackLines.Add($text)
+            }
+        }
+        if ($fallbackLines.Count -gt 0) {
+            return (($fallbackLines -join [Environment]::NewLine).TrimEnd())
+        }
+        return '(вывод команды получен PowerShell как объекты Length; native output could not be recovered as text)'
+    }
     return $result
 }
 
@@ -81,13 +95,30 @@ function Invoke-B1NativeText {
     $lines = New-Object System.Collections.Generic.List[string]
     foreach ($command in @($Commands)) {
         if ([string]::IsNullOrWhiteSpace($command)) { continue }
-        $output = & $env:ComSpec /d /c "$command 2>&1"
-        $outputLines = @($output)
-        foreach ($line in $outputLines) {
-            $lines.Add([string]$line)
-        }
-        if ($LASTEXITCODE -ne 0 -and $outputLines.Count -eq 0) {
-            $lines.Add("ExitCode=$LASTEXITCODE")
+        $psi = [System.Diagnostics.ProcessStartInfo]::new()
+        $psi.FileName = $env:ComSpec
+        $psi.Arguments = "/d /c $command"
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
+        $psi.StandardOutputEncoding = [Console]::OutputEncoding
+        $psi.StandardErrorEncoding = [Console]::OutputEncoding
+
+        $process = [System.Diagnostics.Process]::new()
+        $process.StartInfo = $psi
+        [void]$process.Start()
+        $stdout = $process.StandardOutput.ReadToEnd()
+        $stderr = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+
+        $text = (($stdout + $stderr).TrimEnd())
+        if (-not [string]::IsNullOrWhiteSpace($text)) {
+            foreach ($line in @($text -split "`r?`n")) {
+                $lines.Add($line)
+            }
+        } elseif ($process.ExitCode -ne 0) {
+            $lines.Add("ExitCode=$($process.ExitCode)")
         }
     }
     return (($lines -join [Environment]::NewLine).TrimEnd())
@@ -165,6 +196,25 @@ function Write-B1Section {
     Write-B1Log $Text Magenta
     Write-B1Log '######################################################################################' Magenta
     Write-Host ''
+}
+
+function Write-B1VersionBanner {
+    param([string]$HostKey)
+    $commonPath = $PSCommandPath
+    if ([string]::IsNullOrWhiteSpace($commonPath)) { $commonPath = Join-Path $PSScriptRoot 'b1-common.ps1' }
+    $criteriaHash = ''
+    try {
+        if (Test-Path -LiteralPath $script:CriteriaMapPath) {
+            $criteriaHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $script:CriteriaMapPath).Hash.Substring(0, 12)
+        }
+    } catch {
+        $criteriaHash = 'unavailable'
+    }
+    Write-B1Log "B1 checker version: $script:B1CheckerVersion" Green
+    Write-B1Log "B1 host: $HostKey" DarkGray
+    Write-B1Log "B1 common loaded from: $commonPath" DarkGray
+    Write-B1Log "B1 root: $script:B1Root" DarkGray
+    Write-B1Log "B1 criteria: $script:CriteriaMapPath sha256:$criteriaHash" DarkGray
 }
 
 function Initialize-B1Report {
@@ -375,6 +425,10 @@ function Test-B1IpProfile {
 
 function Test-B1Pings {
     param([string[]]$Targets)
+    $invalidTargets = @(@($Targets) | Where-Object { $_ -match '^198\.18\.10[01]\.31$' })
+    if ($invalidTargets.Count -gt 0) {
+        return @('FAIL', "Obsolete checker path requested invalid WAN target(s): $($invalidTargets -join ', '). Update B1 common script; A1.07/B1.07 must use INET-SRV01 198.18.200.10 service checks.")
+    }
     $bad = @()
     foreach ($target in $Targets) {
         $r = Invoke-B1Evidence "Test-Connection $target -Count 2 -Quiet" { Test-Connection $target -Count 2 -Quiet }
@@ -438,21 +492,70 @@ function Test-B1StaticRoutes {
 }
 
 function Test-B1DomainJoin {
-    param([string]$ExpectedSiteOuFragment)
-    $cs = Invoke-B1Evidence '(Get-CimInstance Win32_ComputerSystem).PartOfDomain' {
+    param([string[]]$ExpectedOuFragments)
+    $cs = Invoke-B1Evidence '(Get-CimInstance Win32_ComputerSystem).PartOfDomain; Get-ADComputer/LDAP DistinguishedName' {
         Get-CimInstance Win32_ComputerSystem | Select-Object Name,Domain,PartOfDomain
     } -RelevantTerms @('Name','Domain','PartOfDomain','True') -ContextLines 2
     $part = (Get-CimInstance Win32_ComputerSystem).PartOfDomain
     if (-not $part) { return @('FAIL', 'Computer is not domain joined.') }
+    $expectedTerms = @($env:COMPUTERNAME) + @($ExpectedOuFragments | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $ad = $null
     if (Get-Command Get-ADComputer -ErrorAction SilentlyContinue) {
         $ad = Invoke-B1Evidence "Get-ADComputer $env:COMPUTERNAME -Properties DistinguishedName" {
             Get-ADComputer $env:COMPUTERNAME -Properties DistinguishedName | Select-Object Name,DistinguishedName
-        } -RelevantTerms @($env:COMPUTERNAME, $ExpectedSiteOuFragment) -ContextLines 2 -AllowError
-        if ($ExpectedSiteOuFragment -and $ad.Text -notmatch [regex]::Escape($ExpectedSiteOuFragment)) {
-            return @('FAIL', "Domain joined, but AD OU fragment not found: $ExpectedSiteOuFragment")
-        }
+        } -RelevantTerms $expectedTerms -ContextLines 2 -AllowError
     } else {
-        return @('WARN', 'Domain joined, but AD module is unavailable for OU validation.')
+        $ad = Invoke-B1Evidence "LDAP query computer DistinguishedName for $env:COMPUTERNAME" {
+            $csLocal = Get-CimInstance Win32_ComputerSystem
+            $ldapRoots = New-Object System.Collections.Generic.List[string]
+            $ldapRoots.Add('LDAP://RootDSE')
+            if (-not [string]::IsNullOrWhiteSpace($csLocal.Domain)) {
+                $ldapRoots.Add(("LDAP://{0}/RootDSE" -f $csLocal.Domain))
+                $nltest = Invoke-B1NativeText @("nltest /dsgetdc:$($csLocal.Domain)")
+                $dcLine = @($nltest -split "`r?`n" | Where-Object { $_ -match '\\\\[^ ]+' } | Select-Object -First 1)
+                if ($dcLine) {
+                    $dcName = ([regex]::Match($dcLine, '\\\\([^ ]+)')).Groups[1].Value
+                    if (-not [string]::IsNullOrWhiteSpace($dcName)) {
+                        $ldapRoots.Add(("LDAP://{0}/RootDSE" -f $dcName))
+                    }
+                }
+            }
+            $root = $null
+            $lastError = $null
+            foreach ($rootPath in @($ldapRoots | Select-Object -Unique)) {
+                try {
+                    $candidateRoot = [ADSI]$rootPath
+                    [void]$candidateRoot.defaultNamingContext
+                    $root = $candidateRoot
+                    "LDAPRoot=$rootPath"
+                    break
+                } catch {
+                    $lastError = $_.Exception.Message
+                }
+            }
+            if ($null -eq $root) {
+                throw "LDAP RootDSE unavailable. Last error: $lastError"
+            }
+            $searchRoot = [ADSI]("LDAP://{0}" -f $root.defaultNamingContext)
+            $searcher = New-Object DirectoryServices.DirectorySearcher($searchRoot)
+            $searcher.Filter = "(&(objectCategory=computer)(sAMAccountName=$env:COMPUTERNAME`$))"
+            [void]$searcher.PropertiesToLoad.Add('distinguishedName')
+            $found = $searcher.FindOne()
+            if ($null -ne $found -and $found.Properties['distinguishedname'].Count -gt 0) {
+                [pscustomobject]@{
+                    Name = $env:COMPUTERNAME
+                    DistinguishedName = [string]$found.Properties['distinguishedname'][0]
+                }
+            }
+        } -RelevantTerms $expectedTerms -ContextLines 2 -AllowError
+    }
+    if (-not $ad -or -not $ad.Ok -or $ad.Error -or [string]::IsNullOrWhiteSpace($ad.Text) -or $ad.Text -match '^\[ERROR\]') {
+        return @('WARN', 'Domain joined, but AD/LDAP query is unavailable for OU validation.')
+    }
+    foreach ($fragment in $ExpectedOuFragments) {
+        if ($fragment -and $ad.Text -notmatch [regex]::Escape($fragment)) {
+            return @('FAIL', "Domain joined, but AD OU fragment not found: $fragment")
+        }
     }
     return @('PASS', 'Domain join and AD placement are proven.')
 }
@@ -491,6 +594,259 @@ function Test-B1CommandWarn {
     )
     Invoke-B1Evidence $Command $ScriptBlock -RelevantTerms $RelevantTerms -RelevantPattern $RelevantPattern -ContextLines 2 -AllowError | Out-Null
     return @('WARN', $Message)
+}
+
+function Test-B1LapsPassword {
+    param([string]$HostKey)
+    $r = Invoke-B1Evidence "Get-LapsADPassword -Identity $HostKey -AsPlainText" {
+        Get-LapsADPassword -Identity $HostKey -AsPlainText |
+            Select-Object ComputerName,DistinguishedName,Account,Password,PasswordUpdateTime,ExpirationTimestamp,DecryptionStatus
+    } -RelevantTerms @($HostKey,'Password','ExpirationTimestamp','PasswordUpdateTime','Success') -ContextLines 1 -AllowError
+    if (-not $r.Ok) { return @('FAIL', 'LAPS query failed.') }
+    $items = @($r.Value)
+    $hasPassword = $false
+    $hasTime = $false
+    $successOk = $true
+    foreach ($item in $items) {
+        if (-not $item) { continue }
+        if ($item.PSObject.Properties['Password'] -and -not [string]::IsNullOrWhiteSpace([string]$item.Password)) {
+            $hasPassword = $true
+        }
+        if (($item.PSObject.Properties['ExpirationTimestamp'] -and -not [string]::IsNullOrWhiteSpace([string]$item.ExpirationTimestamp)) -or
+            ($item.PSObject.Properties['PasswordUpdateTime'] -and -not [string]::IsNullOrWhiteSpace([string]$item.PasswordUpdateTime))) {
+            $hasTime = $true
+        }
+        if ($item.PSObject.Properties['DecryptionStatus'] -and ([string]$item.DecryptionStatus) -notmatch 'Success') {
+            $successOk = $false
+        }
+    }
+    if ($hasPassword -and $hasTime -and $successOk) {
+        return @('PASS', "Windows LAPS password exists in AD for $HostKey.")
+    }
+    $missing = @()
+    if (-not $hasPassword) { $missing += 'Password' }
+    if (-not $hasTime) { $missing += 'ExpirationTimestamp/PasswordUpdateTime' }
+    if (-not $successOk) { $missing += 'DecryptionStatus=Success' }
+    return @('FAIL', "LAPS evidence incomplete: $($missing -join ', ')")
+}
+
+function Test-B1ClientFirewallBaseline {
+    $r = Invoke-B1Evidence "Get-NetFirewallProfile Domain; ICMP Echo allow rules; Remote Desktop Users members" {
+        $domainProfile = Get-NetFirewallProfile -Profile Domain
+        $enabledAllowRules = @(Get-NetFirewallRule -Enabled True -Action Allow -ErrorAction SilentlyContinue)
+        $icmpRules = New-Object System.Collections.Generic.List[object]
+        foreach ($rule in $enabledAllowRules) {
+            $portFilters = @(Get-NetFirewallPortFilter -AssociatedNetFirewallRule $rule -ErrorAction SilentlyContinue)
+            foreach ($filter in $portFilters) {
+                if ($filter.Protocol -match 'ICMPv4|ICMPv6|1|58' -and ($filter.IcmpType -in @('8','Any','*') -or [string]::IsNullOrWhiteSpace([string]$filter.IcmpType))) {
+                    $icmpRules.Add([pscustomobject]@{
+                        DisplayName = $rule.DisplayName
+                        Direction = $rule.Direction
+                        Action = $rule.Action
+                        Profile = $rule.Profile
+                        Protocol = $filter.Protocol
+                        IcmpType = $filter.IcmpType
+                    })
+                }
+            }
+        }
+        $rdpMembers = @(Get-LocalGroupMember 'Remote Desktop Users' -ErrorAction SilentlyContinue)
+        $riskyRdpMembers = @(
+            $rdpMembers |
+                Where-Object {
+                    $_.Name -match '\\(Domain Users|Authenticated Users|Guests|Guest)$|^(Everyone|Authenticated Users|Guests|Guest)$'
+                }
+        )
+
+        [pscustomobject]@{
+            Check = 'DomainFirewallEnabled'
+            Value = [bool]$domainProfile.Enabled
+        }
+        [pscustomobject]@{
+            Check = 'DefaultInboundAction'
+            Value = [string]$domainProfile.DefaultInboundAction
+        }
+        [pscustomobject]@{
+            Check = 'IcmpEchoAllowed'
+            Value = ($icmpRules.Count -gt 0)
+        }
+        [pscustomobject]@{
+            Check = 'IcmpEchoAllowRuleCount'
+            Value = $icmpRules.Count
+        }
+        $icmpRules | Select-Object DisplayName,Direction,Action,Profile,Protocol,IcmpType
+        [pscustomobject]@{
+            Check = 'RemoteDesktopUsersMemberCount'
+            Value = $rdpMembers.Count
+        }
+        if ($rdpMembers.Count -eq 0) {
+            [pscustomobject]@{
+                Check = 'RemoteDesktopUsersMembers'
+                Value = 'None'
+            }
+        } else {
+            $rdpMembers | Select-Object Name,ObjectClass,PrincipalSource
+        }
+        [pscustomobject]@{
+            Check = 'RiskyRdpMemberCount'
+            Value = $riskyRdpMembers.Count
+        }
+    } -RelevantTerms @('DomainFirewallEnabled','IcmpEchoAllowed','RemoteDesktopUsersMemberCount','RiskyRdpMemberCount','True','False') -ContextLines 2 -AllowError
+
+    if (-not $r.Ok) { return @('FAIL', 'Firewall/RDP baseline query failed.') }
+    $items = @($r.Value | Where-Object { $_ })
+    $domainEnabled = $items | Where-Object { $_.PSObject.Properties['Check'] -and $_.Check -eq 'DomainFirewallEnabled' } | Select-Object -First 1
+    $icmpAllowed = $items | Where-Object { $_.PSObject.Properties['Check'] -and $_.Check -eq 'IcmpEchoAllowed' } | Select-Object -First 1
+    $riskyCount = $items | Where-Object { $_.PSObject.Properties['Check'] -and $_.Check -eq 'RiskyRdpMemberCount' } | Select-Object -First 1
+
+    $missing = @()
+    if (-not $domainEnabled -or -not [bool]$domainEnabled.Value) { $missing += 'Domain firewall enabled' }
+    if (-not $icmpAllowed -or -not [bool]$icmpAllowed.Value) { $missing += 'ICMP Echo allow rule' }
+    if ($riskyCount -and [int]$riskyCount.Value -gt 0) { $missing += 'no broad/risky Remote Desktop Users members' }
+    if ($missing.Count -eq 0) {
+        return @('PASS', 'Domain firewall is enabled, ICMP Echo is allowed, and no broad RDP group members were found.')
+    }
+    return @('FAIL', "Baseline mismatch: $($missing -join ', ')")
+}
+
+function Test-B1BitLockerDataVolume {
+    $r = Invoke-B1Evidence 'Get-BitLockerVolume data volumes; manage-bde -status <detected data volume>' {
+        $fixedLetters = @(
+            Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" |
+                Where-Object { $_.DeviceID -ne 'C:' } |
+                Select-Object -ExpandProperty DeviceID
+        )
+        $volumes = @(
+            foreach ($letter in $fixedLetters) {
+                Get-BitLockerVolume -MountPoint $letter -ErrorAction SilentlyContinue
+            }
+        )
+        $volumes |
+            Select-Object MountPoint,VolumeType,VolumeStatus,EncryptionPercentage,ProtectionStatus,KeyProtector
+        $candidate = @(
+            $volumes |
+                Where-Object {
+                    $_.ProtectionStatus -eq 'On' -and
+                    ($_.VolumeStatus -match 'Encrypted|EncryptionInProgress|FullyEncrypted') -and
+                    ($_.KeyProtector | Out-String) -match 'Recovery'
+                }
+        ) | Select-Object -First 1
+        if ($candidate) {
+            "=== manage-bde $($candidate.MountPoint) ==="
+            Invoke-B1NativeText @("manage-bde -status $($candidate.MountPoint)")
+        }
+    } -RelevantTerms @('MountPoint','ProtectionStatus','On','Recovery','FullyEncrypted','Percentage Encrypted') -ContextLines 3 -AllowError
+    if (-not $r.Ok) { return @('FAIL', 'BitLocker data volume query failed.') }
+    $volumes = @($r.Value | Where-Object { $_ -and $_.PSObject.Properties['MountPoint'] })
+    $candidate = @(
+        $volumes |
+            Where-Object {
+                $_.ProtectionStatus -eq 'On' -and
+                ($_.VolumeStatus -match 'Encrypted|EncryptionInProgress|FullyEncrypted') -and
+                ($_.KeyProtector | Out-String) -match 'Recovery'
+            }
+    ) | Select-Object -First 1
+    if ($candidate) {
+        return @('PASS', "BitLocker protection is enabled on data volume $($candidate.MountPoint) with recovery protector.")
+    }
+    return @('FAIL', 'No protected fixed data volume with a recovery protector was found.')
+}
+
+function Test-B1BitLockerRecoveryInAd {
+    param([string]$HostKey)
+    $r = Invoke-B1Evidence "Get BitLocker recovery objects for $HostKey via AD module or LDAP" {
+        if (Get-Command Get-ADComputer -ErrorAction SilentlyContinue) {
+            $comp = Get-ADComputer $HostKey -Properties DistinguishedName
+            Get-ADObject -SearchBase $comp.DistinguishedName -LDAPFilter '(objectClass=msFVE-RecoveryInformation)' -Properties msFVE-RecoveryPassword |
+                Select-Object Name,DistinguishedName,msFVE-RecoveryPassword
+        } else {
+            $root = [ADSI]'LDAP://RootDSE'
+            $searchRoot = [ADSI]("LDAP://{0}" -f $root.defaultNamingContext)
+            $computerSearcher = New-Object DirectoryServices.DirectorySearcher($searchRoot)
+            $computerSearcher.Filter = "(&(objectCategory=computer)(sAMAccountName=$HostKey`$))"
+            [void]$computerSearcher.PropertiesToLoad.Add('distinguishedName')
+            $computer = $computerSearcher.FindOne()
+            if ($null -eq $computer -or $computer.Properties['distinguishedname'].Count -eq 0) {
+                return
+            }
+            $computerDn = [string]$computer.Properties['distinguishedname'][0]
+            $recoveryRoot = [ADSI]("LDAP://{0}" -f $computerDn)
+            $recoverySearcher = New-Object DirectoryServices.DirectorySearcher($recoveryRoot)
+            $recoverySearcher.SearchScope = [DirectoryServices.SearchScope]::OneLevel
+            $recoverySearcher.Filter = '(objectClass=msFVE-RecoveryInformation)'
+            [void]$recoverySearcher.PropertiesToLoad.Add('distinguishedName')
+            [void]$recoverySearcher.PropertiesToLoad.Add('msFVE-RecoveryPassword')
+            foreach ($found in @($recoverySearcher.FindAll())) {
+                [pscustomobject]@{
+                    Name = [string]$found.Properties['name'][0]
+                    DistinguishedName = [string]$found.Properties['distinguishedname'][0]
+                    RecoveryPasswordPresent = ($found.Properties['msfve-recoverypassword'].Count -gt 0)
+                }
+            }
+        }
+    } -RelevantTerms @($HostKey,'msFVE-RecoveryInformation','RecoveryPassword','True') -ContextLines 2 -AllowError
+    if (-not $r.Ok -or $r.Error -or $r.Text -match '^\[ERROR\]') {
+        return @('WARN', "BitLocker recovery AD/LDAP query is unavailable for $HostKey.")
+    }
+    $items = @($r.Value | Where-Object { $_ })
+    if ($items.Count -eq 0) {
+        return @('FAIL', "No BitLocker recovery object found under $HostKey.")
+    }
+    foreach ($item in $items) {
+        if (($item.PSObject.Properties['msFVE-RecoveryPassword'] -and -not [string]::IsNullOrWhiteSpace([string]$item.'msFVE-RecoveryPassword')) -or
+            ($item.PSObject.Properties['RecoveryPasswordPresent'] -and [bool]$item.RecoveryPasswordPresent)) {
+            return @('PASS', "BitLocker recovery information exists in AD for $HostKey.")
+        }
+    }
+    return @('FAIL', "BitLocker recovery object exists for $HostKey, but recovery password is not visible.")
+}
+
+function Import-B1UsersCsvNormalized {
+    param([string]$Path)
+    $rawRows = @(Import-Csv -LiteralPath $Path -Delimiter ';')
+    foreach ($row in $rawRows) {
+        $normalized = [ordered]@{}
+        foreach ($property in $row.PSObject.Properties) {
+            $name = ([string]$property.Name).Trim()
+            if ([string]::IsNullOrWhiteSpace($name)) { continue }
+            $normalized[$name] = ([string]$property.Value).Trim()
+        }
+        [pscustomobject]$normalized
+    }
+}
+
+function Test-B1UsersCsv {
+    $path = 'C:\Skills\b1-users.csv'
+    $r = Invoke-B1Evidence "Import-Csv $path -Delimiter ';' | Select FirstName,LastName,Department,Site" {
+        $rows = @(Import-B1UsersCsvNormalized -Path $path)
+        (($rows | Select-Object FirstName,LastName,Department,Site | Format-Table -AutoSize | Out-String -Width 200).TrimEnd())
+        "UserCount=$($rows.Count)"
+    } -AllowError
+    if (-not $r.Ok) { return @('FAIL', 'CSV import failed.') }
+    $rows = @(Import-B1UsersCsvNormalized -Path $path)
+    $requiredColumns = @('FirstName','LastName','Department','Site')
+    $missingColumns = @()
+    foreach ($column in $requiredColumns) {
+        if ($rows.Count -eq 0 -or -not $rows[0].PSObject.Properties[$column]) { $missingColumns += $column }
+    }
+    if ($missingColumns.Count -gt 0) {
+        return @('FAIL', "CSV missing expected columns: $($missingColumns -join ', ')")
+    }
+    if ($rows.Count -lt 8) {
+        return @('FAIL', "CSV user count is $($rows.Count), expected at least 8.")
+    }
+    $emptyCells = @()
+    foreach ($row in $rows) {
+        foreach ($column in $requiredColumns) {
+            if ([string]::IsNullOrWhiteSpace([string]$row.$column)) {
+                $emptyCells += $column
+            }
+        }
+    }
+    if ($emptyCells.Count -gt 0) {
+        return @('FAIL', "CSV has empty required values in: $((@($emptyCells) | Select-Object -Unique) -join ', ')")
+    }
+    return @('PASS', "CSV file has required columns and $($rows.Count) populated users.")
 }
 
 function Test-B1RepadminShowRepl {
@@ -615,27 +971,35 @@ function Test-B1FileServerAspect {
     param([string]$HostKey, [int]$Seq)
     $isSha = $HostKey -eq 'SHA-FS01'
     $profile = if ($isSha) {
-        @{ IPs=@('10.21.20.20'); Dns=@('10.21.20.10','10.31.20.10'); Ou='00-Servers'; Scope='10.21.30.0'; Router='10.21.30.1'; Shares=@('Common','IT','Home$') }
+        @{ IPs=@('10.21.20.20'); Dns=@('10.21.20.10'); DhcpDns=@('10.21.20.10','10.31.20.10'); Ou='00-Servers'; Scope='10.21.30.0'; Router='10.21.30.1'; Shares=@('Common','IT','Home$'); ShareTerms=@('Common','C:\Shares\Common','IT','C:\Shares\IT','Home$','C:\Shares\Home') }
     } else {
-        @{ IPs=@('10.31.20.20'); Dns=@('10.31.20.10','10.21.20.10'); Ou='00-Servers'; Scope='10.31.30.0'; Router='10.31.30.1'; Shares=@('Branch') }
+        @{ IPs=@('10.31.20.20'); Dns=@('10.31.20.10'); DhcpDns=@('10.31.20.10','10.21.20.10'); Ou='00-Servers'; Scope='10.31.30.0'; Router='10.31.30.1'; Shares=@('Branch'); ShareTerms=@('Branch','C:\Shares\Branch') }
     }
+
+    if ($isSha) {
+        switch ($Seq) {
+            1 { $r1 = Test-B1Hostname $HostKey; $r2 = Test-B1IpProfile $profile; if ($r1[0] -eq 'PASS' -and $r2[0] -eq 'PASS') { return @('PASS','Hostname and IP profile are correct.') }; return @('FAIL', "$($r1[1]); $($r2[1])") }
+            2 { return Test-B1AdObjectTerms 'Get-Service WinRM; Test-WSMan localhost' { Get-Service WinRM; Test-WSMan localhost } @('Running') 'WinRM is available for remote administration.' }
+            3 { return Test-B1AdObjectTerms 'Get-DhcpServerInDC; Get-WindowsFeature DHCP' { Get-DhcpServerInDC; Get-WindowsFeature DHCP } @($HostKey,'DHCP') 'DHCP role and authorization evidence is present.' }
+            4 { return Test-B1AdObjectTerms 'Get-DhcpServerv4Scope; Get-DhcpServerv4ExclusionRange' { Get-DhcpServerv4Scope | Select ScopeId,StartRange,EndRange,Name; Get-DhcpServerv4ExclusionRange -ScopeId $profile.Scope | Select ScopeId,StartRange,EndRange } @($profile.Scope,'100','119','200') 'Expected DHCP scope/range and exclusion are visible.' }
+            5 { return Test-B1AdObjectTerms "Get-DhcpServerv4OptionValue -ScopeId $($profile.Scope)" { Get-DhcpServerv4OptionValue -ScopeId $profile.Scope } @($profile.Router,$profile.DhcpDns[0],$profile.DhcpDns[1],'nb-b1.local') 'DHCP router/DNS/suffix options are visible.' }
+            6 { return Test-B1CommandWarn 'Get-DhcpServerv4DnsSetting' { Get-DhcpServerv4DnsSetting } 'Review dynamic DNS settings and confirm DHCP registers A/PTR records.' -RelevantTerms @('Dynamic','DNS','PTR','A','Update') }
+            7 { return Test-B1AdObjectTerms 'Get-SmbShare' { Get-SmbShare | Select Name,Path } $profile.ShareTerms 'Expected SMB shares and paths exist.' }
+            8 { return Test-B1AdObjectTerms 'Get-Acl C:\Shares\Common' { $acl=Get-Acl 'C:\Shares\Common'; $acl | Select-Object Path,Owner,Group,AccessToString; $acl.Access | Select-Object IdentityReference,FileSystemRights,AccessControlType,IsInherited,InheritanceFlags,PropagationFlags } @('GG_File_Common_RW','GG_File_Common_RO') 'Common ACL contains required groups.' }
+            9 { return Test-B1AdObjectTerms 'Get-Acl C:\Shares\IT' { $acl=Get-Acl 'C:\Shares\IT'; $acl | Select-Object Path,Owner,Group,AccessToString; $acl.Access | Select-Object IdentityReference,FileSystemRights,AccessControlType,IsInherited,InheritanceFlags,PropagationFlags } @('GG_File_IT_RW') 'IT ACL contains required group.' }
+            10 { return Test-B1CommandWarn 'Get-ChildItem C:\Shares\Home; Get-Acl C:\Shares\Home' { Get-ChildItem 'C:\Shares\Home' -ErrorAction SilentlyContinue; Get-Acl 'C:\Shares\Home' -ErrorAction SilentlyContinue } 'Review home folders and ACL isolation for individual users.' -RelevantTerms @('Home','IdentityReference','FileSystemRights','AccessToString') }
+        }
+    }
+
     switch ($Seq) {
         1 { $r1 = Test-B1Hostname $HostKey; $r2 = Test-B1IpProfile $profile; if ($r1[0] -eq 'PASS' -and $r2[0] -eq 'PASS') { return @('PASS','Hostname and IP profile are correct.') }; return @('FAIL', "$($r1[1]); $($r2[1])") }
-        2 { return Test-B1AdObjectTerms 'Get-Service WinRM; Test-WSMan localhost' { Get-Service WinRM; Test-WSMan localhost } @('Running') 'WinRM is available for remote administration.' }
-        3 { return Test-B1AdObjectTerms 'Get-DhcpServerInDC; Get-WindowsFeature DHCP' { Get-DhcpServerInDC; Get-WindowsFeature DHCP } @($HostKey,'DHCP') 'DHCP role and authorization evidence is present.' }
-        4 { return Test-B1AdObjectTerms 'Get-DhcpServerv4Scope' { Get-DhcpServerv4Scope | Select ScopeId,StartRange,EndRange,Name } @($profile.Scope,'100','200') 'Expected DHCP scope/range is visible.' }
-        5 { return Test-B1AdObjectTerms "Get-DhcpServerv4OptionValue -ScopeId $($profile.Scope)" { Get-DhcpServerv4OptionValue -ScopeId $profile.Scope } @($profile.Router,'nb-b1.local') 'DHCP router/DNS/suffix options are visible.' }
-        6 { return Test-B1CommandWarn 'Get-DhcpServerv4DnsSetting' { Get-DhcpServerv4DnsSetting } 'Review dynamic DNS settings and confirm DHCP registers A/PTR records.' -RelevantTerms @('Dynamic','DNS','PTR','A','Update') }
-        7 { return Test-B1AdObjectTerms 'Get-SmbShare' { Get-SmbShare | Select Name,Path } $profile.Shares 'Expected SMB shares exist.' }
-        8 {
-            if ($isSha) { return Test-B1AdObjectTerms 'Get-Acl C:\Shares\Common' { $acl=Get-Acl 'C:\Shares\Common'; $acl | Select-Object Path,Owner,Group,AccessToString; $acl.Access | Select-Object IdentityReference,FileSystemRights,AccessControlType,IsInherited,InheritanceFlags,PropagationFlags } @('GG_File_Common_RW','GG_File_Common_RO') 'Common ACL contains required groups.' }
-            return Test-B1AdObjectTerms 'Get-Acl C:\Shares\Branch' { $acl=Get-Acl 'C:\Shares\Branch'; $acl | Select-Object Path,Owner,Group,AccessToString; $acl.Access | Select-Object IdentityReference,FileSystemRights,AccessControlType,IsInherited,InheritanceFlags,PropagationFlags } @('GG_File_Beijing_RW') 'Branch ACL contains required group.'
-        }
-        9 {
-            if ($isSha) { return Test-B1AdObjectTerms 'Get-Acl C:\Shares\IT' { $acl=Get-Acl 'C:\Shares\IT'; $acl | Select-Object Path,Owner,Group,AccessToString; $acl.Access | Select-Object IdentityReference,FileSystemRights,AccessControlType,IsInherited,InheritanceFlags,PropagationFlags } @('GG_File_IT_RW') 'IT ACL contains required group.' }
-            return Test-B1AdObjectTerms 'Get-Service WinRM; Test-WSMan localhost' { Get-Service WinRM; Test-WSMan localhost } @('Running') 'Remote administration is available.'
-        }
-        10 { return Test-B1CommandWarn 'Get-ChildItem C:\Shares\Home; Get-Acl C:\Shares\Home' { Get-ChildItem 'C:\Shares\Home' -ErrorAction SilentlyContinue; Get-Acl 'C:\Shares\Home' -ErrorAction SilentlyContinue } 'Review home folders and ACL isolation for individual users.' -RelevantTerms @('Home','IdentityReference','FileSystemRights','AccessToString') }
+        2 { return Test-B1AdObjectTerms 'Get-DhcpServerInDC; Get-WindowsFeature DHCP' { Get-DhcpServerInDC; Get-WindowsFeature DHCP } @($HostKey,'DHCP') 'DHCP role and authorization evidence is present.' }
+        3 { return Test-B1AdObjectTerms 'Get-DhcpServerv4Scope; Get-DhcpServerv4ExclusionRange' { Get-DhcpServerv4Scope | Select ScopeId,StartRange,EndRange,Name; Get-DhcpServerv4ExclusionRange -ScopeId $profile.Scope | Select ScopeId,StartRange,EndRange } @($profile.Scope,'100','119','200') 'Expected DHCP scope/range and exclusion are visible.' }
+        4 { return Test-B1AdObjectTerms "Get-DhcpServerv4OptionValue -ScopeId $($profile.Scope)" { Get-DhcpServerv4OptionValue -ScopeId $profile.Scope } @($profile.Router,$profile.DhcpDns[0],$profile.DhcpDns[1],'nb-b1.local') 'DHCP router/DNS/suffix options are visible.' }
+        5 { return Test-B1CommandWarn 'Get-DhcpServerv4DnsSetting' { Get-DhcpServerv4DnsSetting } 'Review dynamic DNS settings and confirm DHCP registers A/PTR records.' -RelevantTerms @('Dynamic','DNS','PTR','A','Update') }
+        6 { return Test-B1AdObjectTerms 'Get-SmbShare -Name Branch' { Get-SmbShare -Name 'Branch' | Select Name,Path } $profile.ShareTerms 'Expected Branch share and path exist.' }
+        7 { return Test-B1AdObjectTerms 'Get-Acl C:\Shares\Branch' { $acl=Get-Acl 'C:\Shares\Branch'; $acl | Select-Object Path,Owner,Group,AccessToString; $acl.Access | Select-Object IdentityReference,FileSystemRights,AccessControlType,IsInherited,InheritanceFlags,PropagationFlags } @('GG_File_Beijing_RW') 'Branch ACL contains required group.' }
+        8 { return Test-B1AdObjectTerms 'Get-Service WinRM; Test-WSMan localhost' { Get-Service WinRM; Test-WSMan localhost } @('Running') 'Remote administration is available.' }
     }
 }
 
@@ -643,35 +1007,39 @@ function Test-B1ClientAspect {
     param([string]$HostKey, [int]$Seq)
     $isSha = $HostKey -eq 'SHA-CL01'
     $profile = if ($isSha) {
-        @{ Range='10.21.30.'; Gateway='10.21.30.1'; Dns=@('10.21.20.10','10.31.20.10'); Ou='10-Workstations'; CrossNames=@('bj-dc02.nb-b1.local','bj-files.nb-b1.local'); CrossTarget='bj-srv01.nb-b1.local' }
+        @{ Range='10.21.30.'; Gateway='10.21.30.1'; Dns=@('10.21.20.10','10.31.20.10'); Ou=@('10-Workstations','Shanghai'); CrossNames=@('bj-dc02.nb-b1.local','bj-files.nb-b1.local'); CrossTarget='bj-srv01.nb-b1.local' }
     } else {
-        @{ Range='10.31.30.'; Gateway='10.31.30.1'; Dns=@('10.31.20.10','10.21.20.10'); Ou='10-Workstations'; CrossNames=@('sha-dc01.nb-b1.local','files.nb-b1.local'); CrossTarget='sha-fs01.nb-b1.local' }
+        @{ Range='10.31.30.'; Gateway='10.31.30.1'; Dns=@('10.31.20.10','10.21.20.10'); Ou=@('10-Workstations','Beijing'); CrossNames=@('sha-dc01.nb-b1.local','files.nb-b1.local'); CrossTarget='sha-fs01.nb-b1.local' }
     }
+    if ($isSha) {
+        switch ($Seq) {
+            1 { return Test-B1IpProfile @{ IPs=@($profile.Range); Gateways=@($profile.Gateway); Dns=$profile.Dns } }
+            2 { return Test-B1DomainJoin $profile.Ou }
+            3 { return Test-B1AdObjectTerms 'gpresult /r /scope computer' { Invoke-B1NativeText @('gpresult /r /scope computer') } @('GPO-B1-Workstations-Security') 'Workstations security GPO is applied.' }
+            4 { return Test-B1ClientFirewallBaseline }
+            5 { return Test-B1LapsPassword $HostKey }
+            6 { return Test-B1BitLockerDataVolume }
+            7 { return Test-B1BitLockerRecoveryInAd $HostKey }
+            8 { return Test-B1UsersCsv }
+            9 { return Test-B1CommandWarn 'Get-Content C:\Skills\Import-B1Users.ps1' { Get-Content 'C:\Skills\Import-B1Users.ps1' } 'Review script content for OU, user and group membership automation.' -RelevantTerms @('Import-Csv','New-ADUser','Add-ADGroupMember','OU=20-Users','GG_') }
+            10 { return Test-B1CommandWarn 'Run Import-B1Users.ps1 twice and inspect output' { Test-Path 'C:\Skills\Import-B1Users.ps1'; Get-ChildItem 'C:\Skills' } 'Idempotency requires reviewing two script runs and AD object state.' -RelevantTerms @('Import-B1Users.ps1','True','LastWriteTime','Mode') }
+            11 { return Test-B1CommandWarn 'net use' { Invoke-B1NativeText @('net use') } 'Review mapped drives under intended Shanghai/IT/GUEST users.' -RelevantTerms @('Common','IT','Home','files','OK','Unavailable') }
+            12 { return Test-B1CommandWarn 'File access smoke commands' { Test-Path '\\files.nb-b1.local\Common'; Test-Path '\\files.nb-b1.local\IT'; Test-Path '\\SHA-FS01\Home$' } 'Run create/read/delete tests under different users and review output.' -RelevantTerms @('True','False','Common','IT','Home') }
+            13 { return Test-B1AdObjectTerms "Resolve-DnsName cross-site names; Test-NetConnection $($profile.CrossTarget) -Port 445" { $profile.CrossNames | ForEach-Object { Resolve-DnsName $_ }; Test-NetConnection $profile.CrossTarget -Port 445 } @('TcpTestSucceeded') 'Cross-site DNS/SMB evidence is present.' }
+            14 { return Test-B1AdObjectTerms 'git -C C:\Skills status; git -C C:\Skills log --oneline -1' { Invoke-B1NativeText @('git -C C:\Skills status','git -C C:\Skills log --oneline -1') } @('final commit') 'Git final commit evidence is visible.' }
+            15 { return Test-B1AdObjectTerms 'Get-Content C:\Skills\B1-selfcheck.txt' { Get-Content 'C:\Skills\B1-selfcheck.txt' } @('AD','DNS','DHCP') 'Self-check file contains infrastructure checks.' }
+        }
+    }
+
     switch ($Seq) {
         1 { return Test-B1IpProfile @{ IPs=@($profile.Range); Gateways=@($profile.Gateway); Dns=$profile.Dns } }
         2 { return Test-B1DomainJoin $profile.Ou }
         3 { return Test-B1AdObjectTerms 'gpresult /r /scope computer' { Invoke-B1NativeText @('gpresult /r /scope computer') } @('GPO-B1-Workstations-Security') 'Workstations security GPO is applied.' }
-        4 { return Test-B1CommandWarn "Get-NetFirewallProfile -Profile Domain; Get-NetFirewallRule; Get-LocalGroupMember 'Remote Desktop Users'" { Get-NetFirewallProfile -Profile Domain; Get-NetFirewallRule -DisplayGroup 'File and Printer Sharing' -ErrorAction SilentlyContinue; Get-LocalGroupMember 'Remote Desktop Users' -ErrorAction SilentlyContinue } 'Review firewall, ICMP and RDP local group evidence.' -RelevantTerms @('Domain','Enabled','File and Printer Sharing','Remote Desktop','Allow') }
-        5 { return Test-B1CommandWarn "Get-LapsADPassword -Identity $HostKey -AsPlainText" { Get-LapsADPassword -Identity $HostKey -AsPlainText } "Review LAPS output and confirm AD password exists for $HostKey." -RelevantTerms @($HostKey,'Password','Expiration','Account','msLAPS') }
-        6 {
-            if ($isSha) { return Test-B1AdObjectTerms 'Get-BitLockerVolume -MountPoint D:; manage-bde -status D:' { Get-BitLockerVolume -MountPoint 'D:'; Invoke-B1NativeText @('manage-bde -status D:') } @('On','Recovery') 'BitLocker D: protection/recovery evidence is visible.' }
-            return Test-B1CommandWarn 'net use' { Invoke-B1NativeText @('net use') } 'Review drive mappings for Beijing users.' -RelevantTerms @('Branch','bj-files','OK','Unavailable')
-        }
-        7 {
-            if ($isSha) { return Test-B1CommandWarn "Get-ADObject BitLocker recovery under $HostKey" { $comp=Get-ADComputer $HostKey; Get-ADObject -SearchBase $comp.DistinguishedName -LDAPFilter '(objectClass=msFVE-RecoveryInformation)' -Properties msFVE-RecoveryPassword } "Review BitLocker recovery object for $HostKey." -RelevantTerms @($HostKey,'msFVE-RecoveryPassword','Recovery') }
-            return Test-B1CommandWarn '\\bj-files.nb-b1.local\Branch access tests' { Test-Path '\\bj-files.nb-b1.local\Branch'; Invoke-B1NativeText @('dir \\bj-files.nb-b1.local\Branch') } 'Review Branch share access under the intended Beijing/GUEST users.' -RelevantTerms @('Branch','True','File(s)','Directory','Access')
-        }
-        8 {
-            if ($isSha) { return Test-B1AdObjectTerms 'Import-Csv C:\Skills\b1-users.csv' { Import-Csv 'C:\Skills\b1-users.csv' | Select-Object FirstName,LastName,Department,Site } @('FirstName','LastName','Department','Site') 'CSV file has required columns.' }
-            return Test-B1AdObjectTerms "Resolve-DnsName cross-site names; Test-NetConnection $($profile.CrossTarget) -Port 445" { $profile.CrossNames | ForEach-Object { Resolve-DnsName $_ }; Test-NetConnection $profile.CrossTarget -Port 445 } @('TcpTestSucceeded') 'Cross-site DNS/SMB evidence is present.'
-        }
-        9 { return Test-B1CommandWarn 'Get-Content C:\Skills\Import-B1Users.ps1' { Get-Content 'C:\Skills\Import-B1Users.ps1' } 'Review script content for OU, user and group membership automation.' -RelevantTerms @('Import-Csv','New-ADUser','Add-ADGroupMember','OU=20-Users','GG_') }
-        10 { return Test-B1CommandWarn 'Run Import-B1Users.ps1 twice and inspect output' { Test-Path 'C:\Skills\Import-B1Users.ps1'; Get-ChildItem 'C:\Skills' } 'Idempotency requires reviewing two script runs and AD object state.' -RelevantTerms @('Import-B1Users.ps1','True','LastWriteTime','Mode') }
-        11 { return Test-B1CommandWarn 'net use' { Invoke-B1NativeText @('net use') } 'Review mapped drives under intended Shanghai/IT/GUEST users.' -RelevantTerms @('Common','IT','Home','files','OK','Unavailable') }
-        12 { return Test-B1CommandWarn 'File access smoke commands' { Test-Path '\\files.nb-b1.local\Common'; Test-Path '\\files.nb-b1.local\IT'; Test-Path '\\SHA-FS01\Home$' } 'Run create/read/delete tests under different users and review output.' -RelevantTerms @('True','False','Common','IT','Home') }
-        13 { return Test-B1AdObjectTerms "Resolve-DnsName cross-site names; Test-NetConnection $($profile.CrossTarget) -Port 445" { $profile.CrossNames | ForEach-Object { Resolve-DnsName $_ }; Test-NetConnection $profile.CrossTarget -Port 445 } @('TcpTestSucceeded') 'Cross-site DNS/SMB evidence is present.' }
-        14 { return Test-B1AdObjectTerms 'git -C C:\Skills status; git -C C:\Skills log --oneline -1' { Invoke-B1NativeText @('git -C C:\Skills status','git -C C:\Skills log --oneline -1') } @('final commit') 'Git final commit evidence is visible.' }
-        15 { return Test-B1AdObjectTerms 'Get-Content C:\Skills\B1-selfcheck.txt' { Get-Content 'C:\Skills\B1-selfcheck.txt' } @('AD','DNS','DHCP') 'Self-check file contains infrastructure checks.' }
+        4 { return Test-B1LapsPassword $HostKey }
+        5 { return Test-B1CommandWarn 'net use' { Invoke-B1NativeText @('net use') } 'Review drive mappings for Beijing users.' -RelevantTerms @('Branch','bj-files','OK','Unavailable') }
+        6 { return Test-B1CommandWarn '\\bj-files.nb-b1.local\Branch access tests' { Test-Path '\\bj-files.nb-b1.local\Branch'; Invoke-B1NativeText @('dir \\bj-files.nb-b1.local\Branch') } 'Review Branch share access under the intended Beijing/GUEST users.' -RelevantTerms @('Branch','True','File(s)','Directory','Access') }
+        7 { return Test-B1AdObjectTerms "Resolve-DnsName cross-site names; Test-NetConnection $($profile.CrossTarget) -Port 445" { $profile.CrossNames | ForEach-Object { Resolve-DnsName $_ }; Test-NetConnection $profile.CrossTarget -Port 445 } @('TcpTestSucceeded') 'Cross-site DNS/SMB evidence is present.' }
+        8 { return Test-B1AdObjectTerms 'Resolve-DnsName www.internet.lab' { Resolve-DnsName 'www.internet.lab' } @('www.internet.lab') 'Simulated Internet DNS name resolves.' }
     }
 }
 
@@ -800,6 +1168,7 @@ function Invoke-B1HostChecks {
     $enableReport = $Report -or (-not [string]::IsNullOrWhiteSpace($ReportDir))
     Initialize-B1Report -HostKey $HostKey -ReportDir $ReportDir -EnableReport:$enableReport
     Write-B1Section "B1 local checks for $HostKey"
+    Write-B1VersionBanner -HostKey $HostKey
     if ($script:B1ReportEnabled) {
         Write-B1Log "Каталог отчета: $script:ReportDir" DarkGray
     } else {
