@@ -15,22 +15,22 @@ A2_START_KEY=1001
 
 usage() {
   cat <<'EOF'
-Usage: bash remote/a2-evaluate-remote.sh [options]
+Использование: bash remote/a2-evaluate-remote.sh [опции]
 
-Options:
-  --pause                  Pause after each checked aspect (default).
-  --no-pause               Run without pauses between aspects.
-  --post-reboot            Run post-reboot persistence checks.
-  --report-dir DIR         Write reports to DIR.
-  --start-from A2.4.6      Resume from criterion/subcriterion index.
-  --resume-from A2.4.6     Alias for --start-from.
-  -h, --help               Show this help.
+Опции:
+  --pause                  Пауза после каждого проверенного аспекта (по умолчанию).
+  --no-pause               Запуск без пауз между аспектами.
+  --post-reboot            Выполнить проверки persistence после reboot.
+  --report-dir DIR         Записать отчеты в DIR.
+  --start-from A2.4.6      Продолжить с указанного критерия/подкритерия.
+  --resume-from A2.4.6     То же, что --start-from.
+  -h, --help               Показать эту справку.
 
-Environment:
-  A2_PASS                  LDAP user password, default Skill39@A2.
-  A2_READER_PASS           ldap-reader password, default Skill39@A2reader.
-  A2_TIMEOUT               SSH connect timeout, default 6.
-  A2_CMD_TIMEOUT           Per-criterion command timeout, default 180.
+Переменные окружения:
+  A2_PASS                  Пароль LDAP-пользователей, по умолчанию Skill39@A2.
+  A2_READER_PASS           Пароль ldap-reader, по умолчанию Skill39@A2reader.
+  A2_TIMEOUT               Таймаут SSH-подключения, по умолчанию 6.
+  A2_CMD_TIMEOUT           Таймаут команды на критерий, по умолчанию 180.
 EOF
 }
 
@@ -58,8 +58,8 @@ criterion_key() {
 validate_start_from() {
   local normalized
   normalized="$(normalize_criterion_id "$A2_START_FROM")" || {
-    echo "Invalid criterion index for --start-from: $A2_START_FROM" >&2
-    echo "Use A2.1, A2.1.1, A2.4.6, etc." >&2
+    echo "Некорректный индекс критерия для --start-from: $A2_START_FROM" >&2
+    echo "Используйте A2.1, A2.1.1, A2.4.6 и т.п." >&2
     exit 2
   }
   A2_START_FROM="$normalized"
@@ -93,7 +93,7 @@ while [ $# -gt 0 ]; do
     --post-reboot) RUN_POST_REBOOT=1 ;;
     --report-dir)
       shift
-      [ $# -gt 0 ] || { echo "Missing value for --report-dir" >&2; exit 2; }
+      [ $# -gt 0 ] || { echo "Не указано значение для --report-dir" >&2; exit 2; }
       A2_REPORT_DIR="$1"
       A2_RESULTS_TSV="$A2_REPORT_DIR/a2-results.tsv"
       A2_DETAIL_LOG="$A2_REPORT_DIR/a2-detail.log"
@@ -101,7 +101,7 @@ while [ $# -gt 0 ]; do
     --start-from|--resume-from)
       opt="$1"
       shift
-      [ $# -gt 0 ] || { echo "Missing value for $opt" >&2; exit 2; }
+      [ $# -gt 0 ] || { echo "Не указано значение для $opt" >&2; exit 2; }
       A2_START_FROM="$1"
       A2_RESUME_MODE=1
       ;;
@@ -110,7 +110,7 @@ while [ $# -gt 0 ]; do
       A2_RESUME_MODE=1
       ;;
     -h|--help) usage; exit 0 ;;
-    *) echo "Unknown option: $1"; exit 2 ;;
+    *) echo "Неизвестная опция: $1"; exit 2 ;;
   esac
   shift
 done
@@ -130,7 +130,7 @@ HOSTS=(east-edge-a2 east-ws-a2 core-edge-a2 ops-ws-a2 repo-a2 auth-a2 portal-a2)
 ssh_root() {
   local host="$1"; shift
   local ip="${HOST_IP[$host]:-$host}"
-  command ssh \
+  command ssh -n \
     -o BatchMode=yes \
     -o ConnectTimeout="$A2_TIMEOUT" \
     -o StrictHostKeyChecking=no \
@@ -140,21 +140,21 @@ ssh_root() {
 }
 
 check_ssh_all() {
-  section "PRECHECK - SSH-доступ к VM"
+  section "ПРЕДВАРИТЕЛЬНАЯ ПРОВЕРКА - SSH-доступ к VM"
   local ok=1
   local h
   for h in "${HOSTS[@]}"; do
     if ssh_root "$h" "true" >/dev/null 2>&1; then
       echo -e "${GREEN}OK - SSH $h (${HOST_IP[$h]})${NC}"
     else
-      echo -e "${RED}FAILED - SSH $h (${HOST_IP[$h]})${NC}"
+      echo -e "${RED}НЕ ДОСТУПЕН - SSH $h (${HOST_IP[$h]})${NC}"
       ok=0
     fi
   done
   if [ "$ok" -eq 1 ]; then
-    echo -e "${GREEN}Все VM доступны по SSH. Можно выполнять remote-проверку.${NC}"
+    echo -e "${GREEN}Все VM доступны по SSH. Можно выполнять удаленную проверку.${NC}"
   else
-    echo -e "${YELLOW}Часть VM недоступна. Remote-проверка продолжится; для недоступных хостов используйте local/a2-local-check.sh.${NC}"
+    echo -e "${YELLOW}Часть VM недоступна. Удаленная проверка продолжится; для недоступных хостов используйте local/a2-local-check.sh.${NC}"
   fi
   pause_if_needed
 }
@@ -204,11 +204,17 @@ ssh() {
   [ $# -gt 0 ] && shift
   local user="$dest"
   if [[ "$user" == *@* ]]; then user="${user%@*}"; fi
-  local base=(-o ConnectTimeout="${A2_TIMEOUT:-6}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
+  local base=(-o ConnectTimeout="${A2_TIMEOUT:-6}" -o ConnectionAttempts=1 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
+  if [ "$user" = "root" ] && [ "$batch" -eq 0 ]; then
+    base+=(-o BatchMode=yes -o NumberOfPasswordPrompts=0)
+  fi
   if [ "$user" != "root" ] && [ "$batch" -eq 0 ] && command -v sshpass >/dev/null 2>&1; then
-    command sshpass -p "${A2_PASS:-Skill39@A2}" ssh "${base[@]}" "${args[@]}" "$dest" "$@"
+    command sshpass -p "${A2_PASS:-Skill39@A2}" ssh -n "${base[@]}" "${args[@]}" "$dest" "$@"
   else
-    command ssh "${base[@]}" "${args[@]}" "$dest" "$@"
+    if [ "$user" != "root" ] && [ "$batch" -eq 0 ]; then
+      base+=(-o BatchMode=yes -o NumberOfPasswordPrompts=0)
+    fi
+    command ssh -n "${base[@]}" "${args[@]}" "$dest" "$@"
   fi
 }
 export A2_PASS A2_READER_PASS A2_TIMEOUT
@@ -218,15 +224,15 @@ EOS
 
   local output rc
   if command -v timeout >/dev/null 2>&1; then
-    output="$(A2_PASS="$A2_PASS" A2_READER_PASS="$A2_READER_PASS" A2_TIMEOUT="$A2_TIMEOUT" timeout "$A2_CMD_TIMEOUT" bash "$tmp" 2>&1)"
+    output="$(A2_PASS="$A2_PASS" A2_READER_PASS="$A2_READER_PASS" A2_TIMEOUT="$A2_TIMEOUT" timeout "$A2_CMD_TIMEOUT" bash "$tmp" </dev/null 2>&1)"
     rc=$?
   else
-    output="$(A2_PASS="$A2_PASS" A2_READER_PASS="$A2_READER_PASS" A2_TIMEOUT="$A2_TIMEOUT" bash "$tmp" 2>&1)"
+    output="$(A2_PASS="$A2_PASS" A2_READER_PASS="$A2_READER_PASS" A2_TIMEOUT="$A2_TIMEOUT" bash "$tmp" </dev/null 2>&1)"
     rc=$?
   fi
   rm -f "$tmp"
   A2_LAST_RC="$rc"
-  printf "%s" "$output"
+  A2_LAST_RAW_OUTPUT="$output"
 }
 
 has_bad_marker() {
@@ -247,12 +253,12 @@ filter_output_for_display() {
     filtered_count="$(printf "%s\n" "$filtered" | wc -l | tr -d ' ')"
     printf "%s\n" "$filtered"
     if [ "$line_count" -gt "$filtered_count" ]; then
-      printf "... filtered output: shown %s relevant lines from %s total lines ...\n" "$filtered_count" "$line_count"
+      printf "... вывод отфильтрован: показано %s релевантных строк из %s ...\n" "$filtered_count" "$line_count"
     fi
   else
     printf "%s\n" "$out" | sed -n '1,120p'
     if [ "$line_count" -gt 120 ]; then
-      printf "... output truncated: shown first 120 lines from %s total lines ...\n" "$line_count"
+      printf "... вывод обрезан: показаны первые 120 строк из %s ...\n" "$line_count"
     fi
   fi
 }
@@ -369,15 +375,16 @@ run_criterion() {
 
   step "$id" "$desc"
   cmd_show "$command"
-  output="$(run_eval_command "$command")"
+  run_eval_command "$command"
+  output="$A2_LAST_RAW_OUTPUT"
   rc="$A2_LAST_RC"
   display_output="$(filter_output_for_display "$output")"
   show_output "$display_output"$'\n'"ExitCode=$rc"
 
   if evaluate_result "$id" "$output" "$rc"; then
-    pass "$id" "$mark" "criterion evidence matches expected result"
+    pass "$id" "$mark" "вывод команд соответствует ожидаемому результату"
   else
-    fail "$id" "$mark" "criterion evidence does not match expected result"
+    fail "$id" "$mark" "вывод команд не соответствует ожидаемому результату"
   fi
 }
 
@@ -390,19 +397,19 @@ run_all_criteria() {
     should_run_criterion "$id" || continue
     if [ "$id" = "A2.8.11" ] && [ "$RUN_POST_REBOOT" != "1" ]; then
       step "$id" "$desc"
-      skip "$id" "$mark" "post-reboot check не запущен; используйте --post-reboot после согласованной перезагрузки"
+      skip "$id" "$mark" "проверка после reboot не запущена; используйте --post-reboot после согласованной перезагрузки"
       continue
     fi
     if [ "$subsection" != "$last_subsection" ]; then
       case "$subsection" in
-        A2.1) section "A2.1 - Base topology and routing" ;;
+        A2.1) section "A2.1 - Базовая топология и маршрутизация" ;;
         A2.2) section "A2.2 - DNS" ;;
-        A2.3) section "A2.3 - PKI and StartTLS trust" ;;
-        A2.4) section "A2.4 - LDAP directory" ;;
-        A2.5) section "A2.5 - SSSD, PAM and SSH policy" ;;
-        A2.6) section "A2.6 - sudo policy" ;;
-        A2.7) section "A2.7 - portal and repo access" ;;
-        A2.8) section "A2.8 - central logs and evidence" ;;
+        A2.3) section "A2.3 - PKI и доверие StartTLS" ;;
+        A2.4) section "A2.4 - LDAP-каталог" ;;
+        A2.5) section "A2.5 - SSSD, PAM и SSH-политики" ;;
+        A2.6) section "A2.6 - sudo-политики" ;;
+        A2.7) section "A2.7 - доступ к portal и repo" ;;
+        A2.8) section "A2.8 - центральные логи и подтверждения" ;;
         *) section "$subsection" ;;
       esac
       last_subsection="$subsection"
@@ -415,22 +422,22 @@ main() {
   validate_start_from
   init_remote_report_files
 
-  echo -e "${CYAN}A2 Shanghai-Shenzhen Remote Evaluator${NC}"
-  echo "Recommended launch host: ops-ws-a2. Report dir: $A2_REPORT_DIR"
-  echo "Started: $(date -Is)" | tee -a "$A2_DETAIL_LOG"
+  echo -e "${CYAN}Удаленный проверочный скрипт A2 Shanghai-Shenzhen${NC}"
+  echo "Рекомендуемый хост запуска: ops-ws-a2. Каталог отчетов: $A2_REPORT_DIR"
+  echo "Запуск: $(date -Is)" | tee -a "$A2_DETAIL_LOG"
   if [ "$A2_RESUME_MODE" = "1" ]; then
-    echo "Start criterion: $A2_START_FROM" | tee -a "$A2_DETAIL_LOG"
+    echo "Начальный критерий: $A2_START_FROM" | tee -a "$A2_DETAIL_LOG"
   fi
 
   if [ "$A2_START_FROM" = "A2.1.1" ]; then
     check_ssh_all
   else
-    echo -e "${CYAN}PRECHECK skipped - resume starts from $A2_START_FROM${NC}" | tee -a "$A2_DETAIL_LOG"
+    echo -e "${CYAN}Предварительная SSH-проверка пропущена - продолжение начинается с $A2_START_FROM${NC}" | tee -a "$A2_DETAIL_LOG"
   fi
 
   run_all_criteria
   write_summary
-  echo -e "${CYAN}Remote evaluation completed. Reports: $A2_REPORT_DIR${NC}"
+  echo -e "${CYAN}Удаленная проверка завершена. Отчеты: $A2_REPORT_DIR${NC}"
 }
 
 main "$@"

@@ -37,7 +37,13 @@ if [ ! -s "$A2_RESULTS_TSV" ]; then
 fi
 
 decode_field() {
-  printf '%b' "$1"
+  local value="$1"
+  value="${value%$'\r'}"
+  if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+    value="${value:1:${#value}-2}"
+    value="${value//\"\"/\"}"
+  fi
+  printf '%b' "$value"
 }
 
 pause_if_needed() {
@@ -84,12 +90,22 @@ print_criterion_context() {
   awk -F'\t' -v id="$id" -v blue="$BLUE" -v nc="$NC" '
     NR == 1 { next }
     $1 == id {
-      gsub(/\\n/, "\n", $6)
+      runfrom = $5
+      if (runfrom == "Run from ops-ws-a2 unless command uses ssh root@<ip>") {
+        runfrom = "Запуск с ops-ws-a2, если команда явно не использует ssh root@<ip>"
+      }
+      command = $6
+      gsub(/\\n/, "\n", command)
+      if (command ~ /^".*"$/) {
+        sub(/^"/, "", command)
+        sub(/"$/, "", command)
+        gsub(/""/, "\"", command)
+      }
       print blue "Критерий: " $1 " - " $3 nc
-      print blue "Run from / target:" nc
-      print $5
+      print blue "Точка запуска / цель:" nc
+      print runfrom
       print blue "Команды проверки:" nc
-      print $6
+      print command
       print blue "Ожидаемый результат:" nc
       print $7
       if ($8 != "") {
@@ -119,9 +135,9 @@ record_result() {
   printf "%s\t%s\t%s\t%s\n" "$id" "$mark" "$status" "$msg" >> "$A2_RESULTS_TSV"
   case "$status" in
     PASS) echo -e "${GREEN}OK [$id/$mark] - $msg${NC}" ;;
-    FAIL) echo -e "${RED}FAILED [$id/$mark] - $msg${NC}" ;;
-    WARN) echo -e "${YELLOW}WARN [$id/$mark] - $msg${NC}" ;;
-    SKIP) echo -e "${CYAN}SKIP [$id/$mark] - $msg${NC}" ;;
+    FAIL) echo -e "${RED}НЕ ЗАСЧИТАНО [$id/$mark] - $msg${NC}" ;;
+    WARN) echo -e "${YELLOW}ПРЕДУПРЕЖДЕНИЕ [$id/$mark] - $msg${NC}" ;;
+    SKIP) echo -e "${CYAN}ПРОПУЩЕНО [$id/$mark] - $msg${NC}" ;;
     *) echo "[$status] [$id/$mark] $msg" ;;
   esac
   pause_if_needed
@@ -186,14 +202,21 @@ write_summary() {
       count[$3]++
     }
     END {
-      printf "A2 Evaluation Summary\n";
+      printf "Сводка проверки A2\n";
       printf "=====================\n";
-      printf "Passed marks: %.2f / %.2f\n", pass, total;
-      printf "Failed marks: %.2f\n", fail;
-      printf "Warn marks:   %.2f\n", warn;
-      printf "Skip marks:   %.2f\n", skip;
-      printf "\nCounts:\n";
-      for (s in count) printf "  %s: %d\n", s, count[s];
+      printf "Засчитано баллов: %.2f / %.2f\n", pass, total;
+      printf "Не засчитано:     %.2f\n", fail;
+      printf "Предупреждения:   %.2f\n", warn;
+      printf "Пропущено:        %.2f\n", skip;
+      printf "\nКоличество:\n";
+      for (s in count) {
+        label=s;
+        if (s=="PASS") label="OK";
+        if (s=="FAIL") label="Не засчитано";
+        if (s=="WARN") label="Предупреждения";
+        if (s=="SKIP") label="Пропущено";
+        printf "  %s: %d\n", label, count[s];
+      }
     }
   ' "$A2_RESULTS_TSV" | tee "$summary"
 }

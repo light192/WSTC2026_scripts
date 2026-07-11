@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copy A2 package to all A2 hosts when SSH connectivity exists.
+# Скопировать пакет A2 на все A2-хосты, если SSH-доступ работает.
 # Run from the package root.
 set -euo pipefail
 
@@ -18,9 +18,9 @@ PKG="$(basename "$PWD")"
 DEST="/root/$PKG"
 
 for h in "${HOSTS[@]}"; do
-  echo "Copying package to $h:$DEST"
+  echo "Копирование пакета на $h:$DEST"
   ssh "${SSH_OPTS[@]}" "$h" "rm -rf '$DEST' && mkdir -p '$DEST'"
   tar -C "$(dirname "$PWD")" -czf - "$PKG" | ssh "${SSH_OPTS[@]}" "$h" "tar -C /root -xzf -"
 done
 
-echo "Done."
+echo "Готово."

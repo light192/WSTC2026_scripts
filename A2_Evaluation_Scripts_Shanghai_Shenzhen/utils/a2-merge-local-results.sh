@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Merge local result TSV files produced by local/a2-local-check.sh.
-# Usage:
+# Объединить локальные TSV-результаты из local/a2-local-check.sh.
+# Использование:
 #   ./a2-merge-local-results.sh /path/to/local-reports
 
 set -euo pipefail
@@ -9,7 +9,7 @@ OUT="$DIR/a2-local-merged-results.tsv"
 SUMMARY="$DIR/a2-local-merged-summary.txt"
 
 if ! ls "$DIR"/a2-local-*-results.tsv >/dev/null 2>&1; then
-  echo "No local result files found in $DIR"
+  echo "В $DIR не найдены локальные файлы результатов"
   exit 1
 fi
 
@@ -28,20 +28,27 @@ awk -F'\t' '
     count[$3]++
   }
   END {
-    print "A2 Local Checks Merged Summary";
+    print "Сводка объединенных локальных проверок A2";
     print "==============================";
-    printf "Rows: %d\n", NR-1;
-    printf "Passed weighted marks from reported rows: %.2f\n", pass;
-    printf "Failed weighted marks from reported rows: %.2f\n", fail;
-    printf "Warn weighted marks from reported rows:   %.2f\n", warn;
-    printf "Skip weighted marks from reported rows:   %.2f\n", skip;
+    printf "Строк: %d\n", NR-1;
+    printf "Засчитано баллов из строк отчета:  %.2f\n", pass;
+    printf "Не засчитано из строк отчета:      %.2f\n", fail;
+    printf "Предупреждения из строк отчета:    %.2f\n", warn;
+    printf "Пропущено из строк отчета:         %.2f\n", skip;
     print "";
-    print "Important: local mode is evidence collection, not a complete automatic final score.";
-    print "Use the XLSX marking scheme and remote script when connectivity is available.";
+    print "Важно: локальный режим собирает подтверждения, это не полный автоматический итоговый балл.";
+    print "Используйте XLSX-схему оценки и remote-скрипт, когда сетевая доступность восстановлена.";
     print "";
-    for (s in count) printf "%s: %d\n", s, count[s];
+    for (s in count) {
+      label=s;
+      if (s=="PASS") label="OK";
+      if (s=="FAIL") label="Не засчитано";
+      if (s=="WARN") label="Предупреждения";
+      if (s=="SKIP") label="Пропущено";
+      printf "%s: %d\n", label, count[s];
+    }
   }
 ' "$OUT" | tee "$SUMMARY"
 
-echo "Merged: $OUT"
-echo "Summary: $SUMMARY"
+echo "Объединено: $OUT"
+echo "Сводка: $SUMMARY"
