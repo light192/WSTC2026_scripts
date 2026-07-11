@@ -1,0 +1,14 @@
+{
+  "name": "A2_Evaluation_Scripts_Shanghai_Shenzhen",
+  "module": "A2",
+  "structure_source": "A1_Evaluation_Scripts_Shanghai_Shenzhen",
+  "marking_scheme_source": "Module A/A2_Marking_Scheme_Shanghai_Shenzhen_Detailed_HowToMark_RU.xlsx",
+  "task_source": "Module A/A2_Competitor_Task_EN_styled.pdf",
+  "recommended_remote_launch_host": "ops-ws-a2",
+  "domain": "atlas.a2.lab",
+  "remote_script": "remote/a2-evaluate-remote.sh",
+  "local_script": "local/a2-local-check.sh",
+  "criteria_map": "criteria/a2_criteria_map.tsv",
+  "criteria_count": 93,
+  "total_marks": 25.0
+}
