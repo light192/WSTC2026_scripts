@@ -1,7 +1,0 @@
-﻿B1 Local Evaluation Summary
-===========================
-Passed marks: 0 / 0
-Failed marks: 0
-Warn marks:   0
-
-Counts:
