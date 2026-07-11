@@ -48,7 +48,12 @@ decode_field() {
 
 pause_if_needed() {
   if [ "${A2_PAUSE}" = "1" ]; then
-    read -r -p "Нажмите [ENTER], чтобы продолжить..."
+    if { exec 9</dev/tty; } 2>/dev/null; then
+      read -r -p "Нажмите [ENTER], чтобы продолжить..." <&9
+      exec 9<&-
+    else
+      echo "Пауза включена, но интерактивная консоль недоступна; продолжаю без ожидания."
+    fi
   fi
 }
 

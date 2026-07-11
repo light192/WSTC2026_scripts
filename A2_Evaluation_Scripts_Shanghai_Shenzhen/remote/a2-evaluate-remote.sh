@@ -391,7 +391,7 @@ run_criterion() {
 run_all_criteria() {
   local last_subsection=""
   local id subsection desc mark runfrom commands expected notes
-  while IFS=$'\t' read -r id subsection desc mark runfrom commands expected notes; do
+  while IFS=$'\t' read -r -u 3 id subsection desc mark runfrom commands expected notes; do
     [ "$id" = "CriterionID" ] && continue
     [ -n "$id" ] || continue
     should_run_criterion "$id" || continue
@@ -415,7 +415,7 @@ run_all_criteria() {
       last_subsection="$subsection"
     fi
     run_criterion "$id" "$subsection" "$desc" "$mark" "$commands"
-  done < "$A2_CRITERIA_MAP"
+  done 3< "$A2_CRITERIA_MAP"
 }
 
 main() {
