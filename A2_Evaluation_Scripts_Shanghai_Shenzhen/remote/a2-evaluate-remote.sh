@@ -217,17 +217,17 @@ ssh() {
     command ssh -n "${base[@]}" "${args[@]}" "$dest" "$@"
   fi
 }
-export A2_PASS A2_READER_PASS A2_TIMEOUT
+export A2_PASS A2_READER_PASS A2_BASE_DN A2_BIND_DN A2_READER_DN A2_TIMEOUT
 EOS
   printf "\n%s\n" "$command" >> "$tmp"
   chmod 700 "$tmp"
 
   local output rc
   if command -v timeout >/dev/null 2>&1; then
-    output="$(A2_PASS="$A2_PASS" A2_READER_PASS="$A2_READER_PASS" A2_TIMEOUT="$A2_TIMEOUT" timeout "$A2_CMD_TIMEOUT" bash "$tmp" </dev/null 2>&1)"
+    output="$(A2_PASS="$A2_PASS" A2_READER_PASS="$A2_READER_PASS" A2_BASE_DN="$A2_BASE_DN" A2_BIND_DN="$A2_BIND_DN" A2_READER_DN="$A2_READER_DN" A2_TIMEOUT="$A2_TIMEOUT" timeout "$A2_CMD_TIMEOUT" bash "$tmp" </dev/null 2>&1)"
     rc=$?
   else
-    output="$(A2_PASS="$A2_PASS" A2_READER_PASS="$A2_READER_PASS" A2_TIMEOUT="$A2_TIMEOUT" bash "$tmp" </dev/null 2>&1)"
+    output="$(A2_PASS="$A2_PASS" A2_READER_PASS="$A2_READER_PASS" A2_BASE_DN="$A2_BASE_DN" A2_BIND_DN="$A2_BIND_DN" A2_READER_DN="$A2_READER_DN" A2_TIMEOUT="$A2_TIMEOUT" bash "$tmp" </dev/null 2>&1)"
     rc=$?
   fi
   rm -f "$tmp"
@@ -244,7 +244,7 @@ filter_output_for_display() {
   local out="$1"
   local filtered line_count filtered_count
   local evidence_re
-  evidence_re='OK|FAIL|BAD|DENIED|allowed|denied|refused|timed out|No route|Permission denied|error|invalid|not found|No such|packet loss|bytes from|Time zone|Locale|Keymap|default|10\.22\.|203\.0\.113\.|2001:db8:a2|east-|core-|ops-|repo-|auth-|portal-|atlas\.a2\.lab|SOA|CNAME|SRV|PTR|flags:|:53|subject=|issuer=|CA:|DNS:|Verify return code|keyUsage|dn:|ou:|cn:|uid:|uidNumber:|gidNumber:|memberUid|namingContexts|userPassword|authzid|result:|slapd|bind9|named|sssd|ldap_|sudo|linuxadmins|operators|auditors|engineers|portalusers|nginx|apache|HTTP_CODE|A2_|/srv/repo/audit|acl|Accepted|Failed|sshd|/admin|DROP|Command:|Expected:|Actual:|Result:|incomplete='
+  evidence_re='OK|FAIL|BAD|DENIED|allowed|denied|refused|timed out|No route|Permission denied|error|invalid|not found|No such|packet loss|bytes from|Time zone|Locale|Keymap|default|10\.22\.|203\.0\.113\.|2001:db8:a2|east-|core-|ops-|repo-|auth-|portal-|atlas\.a2\.lab|SOA|CNAME|SRV|PTR|flags:|:53|subject=|issuer=|CA:|DNS:|Verify return code|keyUsage|dn:|ou:|cn:|uid:|uidNumber:|gidNumber:|memberUid|USER_GROUPS|namingContexts|userPassword|authzid|result:|slapd|bind9|named|sssd|ldap_|sudo|linuxadmins|operators|auditors|engineers|portalusers|nginx|apache|HTTP_CODE|A2_|/srv/repo/audit|acl|Accepted|Failed|sshd|/admin|DROP|Command:|Expected:|Actual:|Result:|incomplete='
 
   line_count="$(printf "%s\n" "$out" | wc -l | tr -d ' ')"
   filtered="$(printf "%s\n" "$out" | grep -Ei "$evidence_re" | sed -n '1,160p' || true)"
@@ -307,7 +307,7 @@ evaluate_result() {
     A2.4.2) contains_all "$out" "ou: People" "ou: Groups" "ou: ServiceAccounts" ;;
     A2.4.3) contains_all "$out" "cn: linuxadmins" "gidNumber: 7200" "cn: operators" "gidNumber: 7210" "cn: auditors" "gidNumber: 7220" "cn: engineers" "gidNumber: 7230" "cn: portalusers" "gidNumber: 7240" ;;
     A2.4.4) contains_all "$out" "uid: li" "uidNumber: 8301" "uid: bekzat" "uidNumber: 8302" "uid: mei" "uidNumber: 8303" "uid: aliya" "uidNumber: 8304" ;;
-    A2.4.5) contains_all "$out" linuxadmins portalusers operators auditors engineers ;;
+    A2.4.5) contains_regex_all "$out" 'USER_GROUPS li: .*linuxadmins' 'USER_GROUPS li: .*portalusers' 'USER_GROUPS bekzat: .*operators' 'USER_GROUPS bekzat: .*portalusers' 'USER_GROUPS mei: .*auditors' 'USER_GROUPS aliya: .*engineers' ;;
     A2.4.6) contains_all "$out" "dn:uid=ldap-reader" ;;
     A2.4.7) contains_regex_any "$out" 'insufficient|denied|not allowed|modification failed|Result: 50' ;;
     A2.4.8) contains_all "$out" namingContexts ;;
