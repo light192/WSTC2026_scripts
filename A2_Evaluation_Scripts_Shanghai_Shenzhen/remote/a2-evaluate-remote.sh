@@ -351,6 +351,92 @@ REMOTE_SSH_DENY_EOF
   echo "SSH_SOURCE_DENY_FAIL ${user}@${host} from ${source_host} login succeeded"
   return 1
 }
+a2_sudo_user_list() {
+  local user="$1"
+  local host="$2"
+  local passq remote_cmd
+
+  passq="$(a2_shell_quote "${A2_USER_PASS:-Skill39@A2}")"
+  remote_cmd="A2_USER_PASS=$passq; printf '%s\n' \"\$A2_USER_PASS\" | sudo -S -p '' -l"
+  a2_ssh_password "$user" "$host" "$remote_cmd"
+}
+a2_sudo_expect_full_access() {
+  local user="$1"
+  local host="$2"
+  local out rc
+
+  echo "SUDO_LIST_TEST FULL_SUDO ${user}@${host}"
+  out="$(a2_sudo_user_list "$user" "$host" 2>&1)"
+  rc=$?
+  printf "%s\n" "$out"
+  if [ "$rc" -eq 0 ] && printf "%s\n" "$out" | grep -Eq '\(ALL([[:space:]]*:[[:space:]]*ALL)?\)[[:space:]]+(NOPASSWD:[[:space:]]*)?ALL'; then
+    echo "FULL_SUDO_OK ${user}@${host}"
+    return 0
+  fi
+  echo "FULL_SUDO_FAIL ${user}@${host} rc=$rc"
+  return 1
+}
+a2_sudo_expect_no_sudo() {
+  local user="$1"
+  local host="$2"
+  local out rc
+
+  echo "SUDO_DENY_TEST NO_SUDO ${user}@${host}"
+  out="$(a2_sudo_user_list "$user" "$host" 2>&1)"
+  rc=$?
+  printf "%s\n" "$out"
+  if [ "$rc" -ne 0 ] || printf "%s\n" "$out" | grep -Eiq 'not allowed|may not run|is not in the sudoers file|Permission denied'; then
+    echo "SUDO_DENIED_OK ${user}@${host} rc=$rc"
+    return 0
+  fi
+  if printf "%s\n" "$out" | grep -Eq 'may run|^[[:space:]]*\([^)]*\)[[:space:]]+'; then
+    echo "SUDO_ALLOWED_BAD ${user}@${host}"
+    return 1
+  fi
+  echo "SUDO_DENIED_OK ${user}@${host} rc=$rc"
+  return 0
+}
+a2_sudo_expect_id_denied() {
+  local user="$1"
+  local host="$2"
+  local out rc passq remote_cmd
+
+  echo "SUDO_DENY_TEST ARBITRARY_SUDO ${user}@${host} sudo id"
+  passq="$(a2_shell_quote "${A2_USER_PASS:-Skill39@A2}")"
+  remote_cmd="A2_USER_PASS=$passq; idcmd=\$(command -v id); printf '%s\n' \"\$A2_USER_PASS\" | sudo -S -p '' -l \"\$idcmd\""
+  out="$(a2_ssh_password "$user" "$host" "$remote_cmd" 2>&1)"
+  rc=$?
+  printf "%s\n" "$out"
+  if [ "$rc" -ne 0 ]; then
+    echo "ARBITRARY_SUDO_DENIED_OK ${user}@${host} rc=$rc"
+    return 0
+  fi
+  echo "ARBITRARY_SUDO_ALLOWED_BAD ${user}@${host}"
+  return 1
+}
+a2_sudo_expect_web_unit() {
+  local user="$1"
+  local host="$2"
+  local action="$3"
+  local ok_marker="$4"
+  local fail_marker="$5"
+  local svc out rc passq remote_cmd
+
+  echo "SUDO_ALLOW_TEST ${ok_marker} ${user}@${host} systemctl ${action} nginx/apache2"
+  passq="$(a2_shell_quote "${A2_USER_PASS:-Skill39@A2}")"
+  for svc in nginx apache2; do
+    remote_cmd="A2_USER_PASS=$passq; for systemctl_cmd in \$(command -v systemctl) /usr/bin/systemctl /bin/systemctl; do [ -n \"\$systemctl_cmd\" ] && [ -x \"\$systemctl_cmd\" ] || continue; printf '%s\n' \"\$A2_USER_PASS\" | sudo -S -p '' -l \"\$systemctl_cmd\" $action $svc && exit 0; done; exit 1"
+    out="$(a2_ssh_password "$user" "$host" "$remote_cmd" 2>&1)"
+    rc=$?
+    printf "%s\n" "$out"
+    if [ "$rc" -eq 0 ]; then
+      echo "${ok_marker} ${user}@${host} systemctl ${action} ${svc}"
+      return 0
+    fi
+  done
+  echo "${fail_marker} ${user}@${host} systemctl ${action} nginx/apache2"
+  return 1
+}
 a2_cert_pem_files() {
   find "${1:-/opt/grading/a2/pki}" -maxdepth 2 -type f -name '*.pem' 2>/dev/null | sort
 }
@@ -495,13 +581,13 @@ evaluate_result() {
     A2.5.14) [ "$(count_regex "$out" 'ROOT_OK')" -ge 7 ] ;;
     A2.5.15) [ "$(count_regex "$out" 'active')" -ge 10 ] ;;
     A2.5.16) contains_all "$out" li bekzat ;;
-    A2.6.1) [ "$(count_regex "$out" 'FULL_SUDO_OK')" -ge 6 ] && ! contains_regex_any "$out" 'SSH_ALLOW_FAIL|SSH_PASSWORD_HELPER_MISSING' ;;
+    A2.6.1) [ "$(count_regex "$out" 'FULL_SUDO_OK')" -ge 6 ] && ! contains_regex_any "$out" 'FULL_SUDO_FAIL|SSH_PASSWORD_HELPER_MISSING' ;;
     A2.6.2) [ "$(count_regex "$out" 'linuxadmins')" -ge 6 ] ;;
     A2.6.3) contains_all "$out" STATUS_ALLOWED && ! contains_regex_any "$out" 'STATUS_DENIED|SSH_ALLOW_FAIL|SSH_PASSWORD_HELPER_MISSING' ;;
     A2.6.4) contains_all "$out" RESTART_ALLOWED && ! contains_regex_any "$out" 'RESTART_DENIED|SSH_ALLOW_FAIL|SSH_PASSWORD_HELPER_MISSING' ;;
     A2.6.5) contains_all "$out" ARBITRARY_SUDO_DENIED_OK && [ "$(count_regex "$out" 'SUDO_DENIED_OK')" -ge 5 ] && ! contains_regex_any "$out" 'ARBITRARY_SUDO_ALLOWED_BAD|SUDO_ALLOWED_BAD|SSH_PASSWORD_HELPER_MISSING' ;;
     A2.6.6) [ "$(count_regex "$out" 'SUDO_DENIED_OK')" -ge 2 ] && ! contains_regex_any "$out" 'SUDO_ALLOWED_BAD|SSH_PASSWORD_HELPER_MISSING' ;;
-    A2.6.7) contains_all "$out" SUDO_DENIED_OK && ! contains_regex_any "$out" 'SUDO_ALLOWED_BAD|SSH_ALLOW_FAIL|SSH_PASSWORD_HELPER_MISSING' ;;
+    A2.6.7) contains_all "$out" SUDO_DENIED_OK && ! contains_regex_any "$out" 'SUDO_ALLOWED_BAD|SSH_PASSWORD_HELPER_MISSING' ;;
     A2.6.8) [ "$rc" -eq 0 ] && ! contains_regex_any "$out" 'parse error|syntax error' ;;
     A2.6.9) contains_regex_any "$out" 'sudo.*li|sudo.*bekzat' && ! contains_regex_any "$out" 'SSH_ALLOW_FAIL|SSH_PASSWORD_HELPER_MISSING' ;;
     A2.7.1) [ "$(count_regex "$out" '^A2_PORTAL_OK$')" -ge 2 ] ;;
@@ -522,7 +608,7 @@ evaluate_result() {
     A2.8.8) contains_regex_all "$out" 'SSH|PAM|sudo' 'allowed|denied|positive|negative|PASS|FAIL' ;;
     A2.8.9) contains_regex_all "$out" 'ROOT_CA_FILE=/.*' 'SERVICES_CA_FILE=/.*' 'PEM_OK ' && ! contains_any "$out" "NOT_FOUND" "PEM_BAD" ;;
     A2.8.10) contains_all "$out" incomplete= ;;
-    A2.8.11) [ "$rc" -eq 0 ] && contains_all "$out" ldap.atlas.a2.lab portal.atlas.a2.lab A2_PORTAL_OK SSH_ALLOW_OK ;;
+    A2.8.11) [ "$rc" -eq 0 ] && contains_all "$out" ldap.atlas.a2.lab portal.atlas.a2.lab A2_PORTAL_OK FULL_SUDO_OK ;;
     *)
       [ "$rc" -eq 0 ] && [ -n "$out" ] && ! has_bad_marker "$out"
       ;;
