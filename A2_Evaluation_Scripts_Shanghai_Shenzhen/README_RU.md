@@ -64,6 +64,7 @@ sudo bash local/a2-local-check.sh --report-dir /opt/grading/a2/local-report
 
 ```bash
 export A2_PASS='Skill39@A1'
+export A2_USER_PASS='Skill39@A2'
 export A2_READER_PASS='Skill39@A2reader'
 export A2_TIMEOUT=6
 export A2_CMD_TIMEOUT=180

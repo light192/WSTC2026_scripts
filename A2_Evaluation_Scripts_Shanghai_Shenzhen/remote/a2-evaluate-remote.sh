@@ -27,7 +27,8 @@ usage() {
   -h, --help               Показать эту справку.
 
 Переменные окружения:
-  A2_PASS                  Пароль LDAP-пользователей, по умолчанию Skill39@A1.
+  A2_PASS                  Пароль admin bind, по умолчанию Skill39@A1.
+  A2_USER_PASS             Пароль LDAP-пользователей, по умолчанию Skill39@A2.
   A2_READER_PASS           Пароль ldap-reader, по умолчанию Skill39@A2reader.
   A2_TIMEOUT               Таймаут SSH-подключения, по умолчанию 6.
   A2_CMD_TIMEOUT           Таймаут команды на критерий, по умолчанию 180.
@@ -209,7 +210,7 @@ ssh() {
     base+=(-o BatchMode=yes -o NumberOfPasswordPrompts=0)
   fi
   if [ "$user" != "root" ] && [ "$batch" -eq 0 ] && command -v sshpass >/dev/null 2>&1; then
-    command sshpass -p "${A2_PASS:-Skill39@A1}" ssh -n "${base[@]}" "${args[@]}" "$dest" "$@"
+    command sshpass -p "${A2_USER_PASS:-Skill39@A2}" ssh -n "${base[@]}" "${args[@]}" "$dest" "$@"
   else
     if [ "$user" != "root" ] && [ "$batch" -eq 0 ]; then
       base+=(-o BatchMode=yes -o NumberOfPasswordPrompts=0)
@@ -244,17 +245,17 @@ a2_find_pem_by_san_dns() {
   done < <(a2_cert_pem_files "$dir")
   return 1
 }
-export A2_PASS A2_READER_PASS A2_BASE_DN A2_BIND_DN A2_READER_DN A2_TIMEOUT
+export A2_PASS A2_USER_PASS A2_READER_PASS A2_BASE_DN A2_BIND_DN A2_READER_DN A2_TIMEOUT
 EOS
   printf "\n%s\n" "$command" >> "$tmp"
   chmod 700 "$tmp"
 
   local output rc
   if command -v timeout >/dev/null 2>&1; then
-    output="$(A2_PASS="$A2_PASS" A2_READER_PASS="$A2_READER_PASS" A2_BASE_DN="$A2_BASE_DN" A2_BIND_DN="$A2_BIND_DN" A2_READER_DN="$A2_READER_DN" A2_TIMEOUT="$A2_TIMEOUT" timeout "$A2_CMD_TIMEOUT" bash "$tmp" </dev/null 2>&1)"
+    output="$(A2_PASS="$A2_PASS" A2_USER_PASS="$A2_USER_PASS" A2_READER_PASS="$A2_READER_PASS" A2_BASE_DN="$A2_BASE_DN" A2_BIND_DN="$A2_BIND_DN" A2_READER_DN="$A2_READER_DN" A2_TIMEOUT="$A2_TIMEOUT" timeout "$A2_CMD_TIMEOUT" bash "$tmp" </dev/null 2>&1)"
     rc=$?
   else
-    output="$(A2_PASS="$A2_PASS" A2_READER_PASS="$A2_READER_PASS" A2_BASE_DN="$A2_BASE_DN" A2_BIND_DN="$A2_BIND_DN" A2_READER_DN="$A2_READER_DN" A2_TIMEOUT="$A2_TIMEOUT" bash "$tmp" </dev/null 2>&1)"
+    output="$(A2_PASS="$A2_PASS" A2_USER_PASS="$A2_USER_PASS" A2_READER_PASS="$A2_READER_PASS" A2_BASE_DN="$A2_BASE_DN" A2_BIND_DN="$A2_BIND_DN" A2_READER_DN="$A2_READER_DN" A2_TIMEOUT="$A2_TIMEOUT" bash "$tmp" </dev/null 2>&1)"
     rc=$?
   fi
   rm -f "$tmp"
@@ -271,7 +272,7 @@ filter_output_for_display() {
   local out="$1"
   local filtered line_count filtered_count
   local evidence_re
-  evidence_re='OK|FAIL|BAD|DENIED|allowed|denied|refused|timed out|No route|Permission denied|error|invalid|not found|No such|packet loss|bytes from|Time zone|Locale|Keymap|default|10\.22\.|203\.0\.113\.|2001:db8:a2|east-|core-|ops-|repo-|auth-|portal-|atlas\.a2\.lab|SOA|CNAME|SRV|PTR|flags:|status:|:53|subject=|issuer=|CA:|DNS:|DNS_RECURSION|Verify return code|keyUsage|ROOT_CA_FILE|SERVICES_CA_FILE|LDAP_CERT_SOURCE|PORTAL_CERT_SOURCE|PEM_OK|PEM_BAD|dn:|ou:|cn:|uid:|uidNumber:|gidNumber:|memberUid|USER_GROUPS|namingContexts|userPassword|authzid|result:|slapd|bind9|named|sssd|ldap_|sudo|linuxadmins|operators|auditors|engineers|portalusers|nginx|apache|HTTP_CODE|A2_|/srv/repo/audit|acl|Accepted|Failed|sshd|/admin|DROP|Command:|Expected:|Actual:|Result:|incomplete='
+  evidence_re='OK|FAIL|BAD|DENIED|allowed|denied|refused|timed out|No route|Permission denied|error|invalid|not found|No such|packet loss|bytes from|Time zone|Locale|Keymap|default|10\.22\.|203\.0\.113\.|2001:db8:a2|east-|core-|ops-|repo-|auth-|portal-|atlas\.a2\.lab|SOA|CNAME|SRV|PTR|flags:|status:|:53|subject=|issuer=|CA:|DNS:|DNS_RECURSION|Verify return code|keyUsage|ROOT_CA_FILE|ROOT_CA_BASIC_CONSTRAINTS|ROOT_CA_KEY_USAGE|SERVICES_CA_FILE|LDAP_CERT_SOURCE|PORTAL_CERT_SOURCE|PEM_OK|PEM_BAD|A2_3_8|SSSD_|SYSTEM_CA|ROOTDSE_ANON|LDAP_USER_BIND|dn:|ou:|cn:|uid:|uidNumber:|gidNumber:|memberUid|USER_GROUPS|namingContexts|userPassword|authzid|result:|slapd|bind9|named|sssd|ldap_|sudo|linuxadmins|operators|auditors|engineers|portalusers|nginx|apache|HTTP_CODE|A2_|/srv/repo/audit|acl|Accepted|Failed|sshd|/admin|DROP|Command:|Expected:|Actual:|Result:|incomplete='
 
   line_count="$(printf "%s\n" "$out" | wc -l | tr -d ' ')"
   filtered="$(printf "%s\n" "$out" | grep -Ei "$evidence_re" | sed -n '1,160p' || true)"
@@ -319,14 +320,14 @@ evaluate_result() {
     A2.2.9) ! contains_regex_any "$out" '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' ;;
     A2.2.10) contains_regex_all "$out" 'enabled' 'active' ;;
     A2.2.11) contains_all "$out" 10.22.10.1 203.0.113.10 203.0.113.20 10.22.20.1 10.22.30.1 10.22.40.1 ;;
-    A2.3.1) contains_all "$out" "Atlas A2 Root CA" "CA:TRUE" && contains_regex_all "$out" 'keyCertSign' 'cRLSign' ;;
+    A2.3.1) contains_all "$out" "Atlas A2 Root CA" "ROOT_CA_BASIC_CONSTRAINTS_OK" "ROOT_CA_KEY_USAGE_OK" ;;
     A2.3.2) contains_all "$out" "Atlas A2 Services CA" "OK" "CA:TRUE" ;;
     A2.3.3) [ "$rc" -eq 0 ] && contains_regex_all "$out" 'ROOT_CA_FILE=/.*' 'SERVICES_CA_FILE=/.*' 'PEM_OK ' && ! contains_any "$out" "NOT_FOUND" "PEM_BAD" ;;
     A2.3.4) contains_all "$out" "DNS:auth-a2.atlas.a2.lab" "DNS:ldap.atlas.a2.lab" "DNS:ca.atlas.a2.lab" ;;
     A2.3.5) contains_all "$out" "DNS:portal-a2.atlas.a2.lab" "DNS:portal.atlas.a2.lab" ;;
     A2.3.6) contains_all "$out" "dn:" "Verify return code: 0" ;;
     A2.3.7) contains_all "$out" "dn:" ;;
-    A2.3.8) contains_all "$out" ldap_id_use_start_tls ldap_tls_reqcert ldap_tls_cacert ;;
+    A2.3.8) [ "$(count_regex "$out" 'SSSD_STARTTLS_OK')" -ge 4 ] && [ "$(count_regex "$out" 'SSSD_REQCERT_OK')" -ge 4 ] && [ "$(count_regex "$out" 'SSSD_CACERT_FILE_OK')" -ge 4 ] && [ "$(count_regex "$out" 'SYSTEM_CA_OK')" -ge 4 ] && ! contains_regex_any "$out" 'SSSD_.*MISSING|SYSTEM_CA_MISSING' ;;
     A2.3.9) [ "$(count_regex "$out" 'HTTPS_OK')" -ge 2 ] ;;
     A2.3.10) [ -n "$out" ] && ! contains_regex_any "$out" '^-...r..r..|^-......r..' ;;
     A2.3.11) [ "$rc" -eq 0 ] && contains_regex_all "$out" 'ROOT_CA_FILE=/.*' 'SERVICES_CA_FILE=/.*' 'LDAP_CERT_SOURCE=' 'PORTAL_CERT_SOURCE=' && [ "$(count_regex "$out" ': OK|OK$')" -ge 2 ] ;;
@@ -338,11 +339,11 @@ evaluate_result() {
     A2.4.5) contains_regex_all "$out" 'USER_GROUPS li: .*linuxadmins' 'USER_GROUPS li: .*portalusers' 'USER_GROUPS bekzat: .*operators' 'USER_GROUPS bekzat: .*portalusers' 'USER_GROUPS mei: .*auditors' 'USER_GROUPS aliya: .*engineers' ;;
     A2.4.6) contains_all "$out" "dn:uid=ldap-reader" ;;
     A2.4.7) contains_regex_any "$out" 'insufficient|denied|not allowed|modification failed|Result: 50' ;;
-    A2.4.8) contains_all "$out" namingContexts ;;
+    A2.4.8) contains_all "$out" "ROOTDSE_ANON_OK" namingContexts ;;
     A2.4.9) ! contains_regex_any "$out" 'uid: (li|bekzat|mei|aliya)' ;;
     A2.4.10) ! contains_all "$out" "userPassword:" ;;
     A2.4.11) contains_all "$out" "dn:" ;;
-    A2.4.12) [ "$(count_regex "$out" 'dn:uid=')" -ge 4 ] ;;
+    A2.4.12) [ "$(count_regex "$out" 'LDAP_USER_BIND_OK')" -ge 4 ] && ! contains_regex_any "$out" 'LDAP_USER_BIND_(INVALID_CREDENTIALS|FAIL)' ;;
     A2.4.13) contains_all "$out" posixAccount posixGroup uidNumber gidNumber ;;
     A2.4.14) contains_all "$out" enabled active ;;
     A2.5.1) [ "$(count_regex "$out" 'enabled')" -ge 6 ] && [ "$(count_regex "$out" 'active')" -ge 6 ] ;;
