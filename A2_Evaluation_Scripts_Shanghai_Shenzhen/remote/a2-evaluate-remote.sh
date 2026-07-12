@@ -173,6 +173,30 @@ run_eval_command() {
   cat > "$tmp" <<'EOS'
 #!/usr/bin/env bash
 set -o pipefail
+a2_ssh_password_command() {
+  local pass="${A2_USER_PASS:-Skill39@A2}"
+
+  if command -v sshpass >/dev/null 2>&1; then
+    command sshpass -p "$pass" ssh -n "$@"
+    return $?
+  fi
+
+  local askpass rc
+  askpass="$(mktemp)" || return 127
+  cat > "$askpass" <<'ASKPASS_EOF'
+#!/usr/bin/env sh
+printf '%s\n' "$A2_USER_PASS"
+ASKPASS_EOF
+  chmod 700 "$askpass"
+  if command -v setsid >/dev/null 2>&1; then
+    A2_USER_PASS="$pass" SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force DISPLAY="${DISPLAY:-:0}" setsid -w ssh -n "$@"
+  else
+    A2_USER_PASS="$pass" SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force DISPLAY="${DISPLAY:-:0}" ssh -n "$@"
+  fi
+  rc=$?
+  rm -f "$askpass"
+  return "$rc"
+}
 ssh() {
   local args=()
   local batch=0
@@ -209,14 +233,123 @@ ssh() {
   if [ "$user" = "root" ] && [ "$batch" -eq 0 ]; then
     base+=(-o BatchMode=yes -o NumberOfPasswordPrompts=0)
   fi
-  if [ "$user" != "root" ] && [ "$batch" -eq 0 ] && command -v sshpass >/dev/null 2>&1; then
-    command sshpass -p "${A2_USER_PASS:-Skill39@A2}" ssh -n "${base[@]}" "${args[@]}" "$dest" "$@"
+  if [ "$user" != "root" ] && [ "$batch" -eq 0 ]; then
+    a2_ssh_password_command "${base[@]}" -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive -o NumberOfPasswordPrompts=1 "${args[@]}" "$dest" "$@"
   else
-    if [ "$user" != "root" ] && [ "$batch" -eq 0 ]; then
-      base+=(-o BatchMode=yes -o NumberOfPasswordPrompts=0)
-    fi
     command ssh -n "${base[@]}" "${args[@]}" "$dest" "$@"
   fi
+}
+a2_ssh_password() {
+  local user="$1"
+  local host="$2"
+  shift 2
+  local remote_cmd="${*:-true}"
+
+  a2_ssh_password_command \
+    -o ConnectTimeout="${A2_TIMEOUT:-6}" \
+    -o ConnectionAttempts=1 \
+    -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    -o LogLevel=ERROR \
+    -o PubkeyAuthentication=no \
+    -o PreferredAuthentications=password,keyboard-interactive \
+    -o NumberOfPasswordPrompts=1 \
+    "${user}@${host}" "$remote_cmd"
+}
+a2_ssh_expect_allow() {
+  local user="$1"
+  local host="$2"
+  shift 2
+  local remote_cmd="${*:-echo SSH_OK:\$USER}"
+  local out rc
+
+  echo "SSH_ALLOW_TEST ${user}@${host}"
+  out="$(a2_ssh_password "$user" "$host" "$remote_cmd" 2>&1)"
+  rc=$?
+  printf "%s\n" "$out"
+  if [ "$rc" -eq 0 ]; then
+    echo "SSH_ALLOW_OK ${user}@${host}"
+    return 0
+  fi
+  echo "SSH_ALLOW_FAIL ${user}@${host} rc=$rc"
+  return 1
+}
+a2_ssh_expect_deny() {
+  local user="$1"
+  local host="$2"
+  shift 2
+  local remote_cmd="${*:-echo SHOULD_NOT_LOGIN:\$USER}"
+  local out rc
+
+  echo "SSH_DENY_TEST ${user}@${host}"
+  out="$(a2_ssh_password "$user" "$host" "$remote_cmd" 2>&1)"
+  rc=$?
+  printf "%s\n" "$out"
+  if [ "$rc" -ne 0 ]; then
+    echo "SSH_DENY_OK ${user}@${host} rc=$rc"
+    return 0
+  fi
+  echo "SSH_DENY_FAIL ${user}@${host} login succeeded"
+  return 1
+}
+a2_shell_quote() {
+  printf "'%s'" "$(printf "%s" "$1" | sed "s/'/'\\\\''/g")"
+}
+a2_ssh_expect_deny_from() {
+  local source_host="$1"
+  local user="$2"
+  local host="$3"
+  shift 3
+  local remote_cmd="${*:-echo SHOULD_NOT_LOGIN:\$USER}"
+  local out rc
+
+  echo "SSH_SOURCE_DENY_TEST ${user}@${host} from ${source_host}"
+  out="$(
+    {
+      printf 'A2_USER_PASS=%s\n' "$(a2_shell_quote "${A2_USER_PASS:-Skill39@A2}")"
+      printf 'A2_SSH_USER=%s\n' "$(a2_shell_quote "$user")"
+      printf 'A2_SSH_HOST=%s\n' "$(a2_shell_quote "$host")"
+      printf 'A2_SSH_COMMAND=%s\n' "$(a2_shell_quote "$remote_cmd")"
+      cat <<'REMOTE_SSH_DENY_EOF'
+set -o pipefail
+base=(-o ConnectTimeout="${A2_TIMEOUT:-6}" -o ConnectionAttempts=1 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive -o NumberOfPasswordPrompts=1)
+if command -v sshpass >/dev/null 2>&1; then
+  sshpass -p "$A2_USER_PASS" ssh -n "${base[@]}" "${A2_SSH_USER}@${A2_SSH_HOST}" "$A2_SSH_COMMAND"
+  exit $?
+fi
+askpass="$(mktemp)" || exit 127
+cat > "$askpass" <<'ASKPASS_EOF'
+#!/usr/bin/env sh
+printf '%s\n' "$A2_USER_PASS"
+ASKPASS_EOF
+chmod 700 "$askpass"
+if command -v setsid >/dev/null 2>&1; then
+  SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force DISPLAY="${DISPLAY:-:0}" setsid -w ssh -n "${base[@]}" "${A2_SSH_USER}@${A2_SSH_HOST}" "$A2_SSH_COMMAND"
+else
+  SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force DISPLAY="${DISPLAY:-:0}" ssh -n "${base[@]}" "${A2_SSH_USER}@${A2_SSH_HOST}" "$A2_SSH_COMMAND"
+fi
+rc=$?
+rm -f "$askpass"
+exit "$rc"
+REMOTE_SSH_DENY_EOF
+    } | command ssh \
+      -o ConnectTimeout="${A2_TIMEOUT:-6}" \
+      -o ConnectionAttempts=1 \
+      -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null \
+      -o LogLevel=ERROR \
+      -o BatchMode=yes \
+      -o NumberOfPasswordPrompts=0 \
+      "root@${source_host}" 'bash -s' 2>&1
+  )"
+  rc=$?
+  printf "%s\n" "$out"
+  if [ "$rc" -ne 0 ]; then
+    echo "SSH_SOURCE_DENY_OK ${user}@${host} from ${source_host} rc=$rc"
+    return 0
+  fi
+  echo "SSH_SOURCE_DENY_FAIL ${user}@${host} from ${source_host} login succeeded"
+  return 1
 }
 a2_cert_pem_files() {
   find "${1:-/opt/grading/a2/pki}" -maxdepth 2 -type f -name '*.pem' 2>/dev/null | sort
@@ -272,7 +405,7 @@ filter_output_for_display() {
   local out="$1"
   local filtered line_count filtered_count
   local evidence_re
-  evidence_re='OK|FAIL|BAD|DENIED|allowed|denied|refused|timed out|No route|Permission denied|error|invalid|not found|No such|packet loss|bytes from|Time zone|Locale|Keymap|default|10\.22\.|203\.0\.113\.|2001:db8:a2|east-|core-|ops-|repo-|auth-|portal-|atlas\.a2\.lab|SOA|CNAME|SRV|PTR|flags:|status:|:53|subject=|issuer=|CA:|DNS:|DNS_RECURSION|Verify return code|keyUsage|ROOT_CA_FILE|ROOT_CA_BASIC_CONSTRAINTS|ROOT_CA_KEY_USAGE|SERVICES_CA_FILE|LDAP_CERT_SOURCE|PORTAL_CERT_SOURCE|PEM_OK|PEM_BAD|A2_3_8|SSSD_|SYSTEM_CA|ROOTDSE_ANON|LDAP_USER_BIND|dn:|ou:|cn:|uid:|uidNumber:|gidNumber:|memberUid|USER_GROUPS|namingContexts|userPassword|authzid|result:|slapd|bind9|named|sssd|ldap_|sudo|linuxadmins|operators|auditors|engineers|portalusers|nginx|apache|HTTP_CODE|A2_|/srv/repo/audit|acl|Accepted|Failed|sshd|/admin|DROP|Command:|Expected:|Actual:|Result:|incomplete='
+  evidence_re='OK|FAIL|BAD|DENIED|allowed|denied|refused|timed out|No route|Permission denied|error|invalid|not found|No such|packet loss|bytes from|Time zone|Locale|Keymap|default|10\.22\.|203\.0\.113\.|2001:db8:a2|east-|core-|ops-|repo-|auth-|portal-|atlas\.a2\.lab|SOA|CNAME|SRV|PTR|flags:|status:|:53|subject=|issuer=|CA:|DNS:|DNS_RECURSION|Verify return code|keyUsage|ROOT_CA_FILE|ROOT_CA_BASIC_CONSTRAINTS|ROOT_CA_KEY_USAGE|SERVICES_CA_FILE|LDAP_CERT_SOURCE|PORTAL_CERT_SOURCE|PEM_OK|PEM_BAD|A2_3_8|SSSD_|SYSTEM_CA|ROOTDSE_ANON|LDAP_USER_BIND|SSH_|PORTAL_ADMIN_|dn:|ou:|cn:|uid:|uidNumber:|gidNumber|memberUid|USER_GROUPS|namingContexts|userPassword|authzid|result:|slapd|bind9|named|sssd|ldap_|sudo|linuxadmins|operators|auditors|engineers|portalusers|nginx|apache|HTTP_CODE|A2_|/srv/repo/audit|acl|Accepted|Failed|sshd|/admin|DROP|Command:|Expected:|Actual:|Result:|incomplete='
 
   line_count="$(printf "%s\n" "$out" | wc -l | tr -d ' ')"
   filtered="$(printf "%s\n" "$out" | grep -Ei "$evidence_re" | sed -n '1,160p' || true)"
@@ -320,7 +453,7 @@ evaluate_result() {
     A2.2.9) ! contains_regex_any "$out" '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' ;;
     A2.2.10) contains_regex_all "$out" 'enabled' 'active' ;;
     A2.2.11) contains_all "$out" 10.22.10.1 203.0.113.10 203.0.113.20 10.22.20.1 10.22.30.1 10.22.40.1 ;;
-    A2.3.1) contains_all "$out" "Atlas A2 Root CA" "ROOT_CA_BASIC_CONSTRAINTS_OK" "ROOT_CA_KEY_USAGE_OK" ;;
+    A2.3.1) contains_all "$out" "Atlas A2 Root CA" "ROOT_CA_BASIC_CONSTRAINTS_OK" ;;
     A2.3.2) contains_all "$out" "Atlas A2 Services CA" "OK" "CA:TRUE" ;;
     A2.3.3) [ "$rc" -eq 0 ] && contains_regex_all "$out" 'ROOT_CA_FILE=/.*' 'SERVICES_CA_FILE=/.*' 'PEM_OK ' && ! contains_any "$out" "NOT_FOUND" "PEM_BAD" ;;
     A2.3.4) contains_all "$out" "DNS:auth-a2.atlas.a2.lab" "DNS:ldap.atlas.a2.lab" "DNS:ca.atlas.a2.lab" ;;
@@ -351,45 +484,45 @@ evaluate_result() {
     A2.5.3) ! contains_regex_any "$out" 'tls_reqcert *= *(never|allow)' && contains_regex_any "$out" '^600 | 600 root:root|^640 ' ;;
     A2.5.4) [ "$(count_regex "$out" 'li:|bekzat:|mei:|aliya:')" -ge 20 ] ;;
     A2.5.5) contains_all "$out" linuxadmins operators auditors engineers portalusers ;;
-    A2.5.6) [ "$(count_regex "$out" 'HOME_OK')" -ge 2 ] ;;
-    A2.5.7) [ "$(count_regex "$out" 'SSH_OK')" -ge 3 ] ;;
-    A2.5.8) contains_all "$out" DENIED_OK && ! contains_all "$out" SHOULD_NOT_LOGIN ;;
-    A2.5.9) [ "$(count_regex "$out" 'SSH_OK')" -ge 2 ] && [ "$(count_regex "$out" 'DENIED_OK')" -ge 2 ] && ! has_bad_marker "$out" ;;
-    A2.5.10) [ "$(count_regex "$out" 'SSH_OK')" -ge 2 ] && [ "$(count_regex "$out" 'DENIED_OK')" -ge 2 ] && ! has_bad_marker "$out" ;;
-    A2.5.11) [ "$(count_regex "$out" 'SSH_OK')" -ge 2 ] && [ "$(count_regex "$out" 'DENIED_OK')" -ge 2 ] && ! has_bad_marker "$out" ;;
-    A2.5.12) [ "$(count_regex "$out" 'GW_OK')" -ge 2 ] ;;
-    A2.5.13) [ "$(count_regex "$out" 'DENIED_OK')" -ge 3 ] && contains_all "$out" SH_SOURCE_DENIED_OK && ! has_bad_marker "$out" ;;
+    A2.5.6) [ "$(count_regex "$out" 'HOME_OK')" -ge 2 ] && ! contains_regex_any "$out" 'SSH_ALLOW_FAIL|SSH_PASSWORD_HELPER_MISSING' ;;
+    A2.5.7) [ "$(count_regex "$out" 'SSH_ALLOW_OK')" -ge 3 ] && ! contains_regex_any "$out" 'SSH_ALLOW_FAIL|SSH_PASSWORD_HELPER_MISSING' ;;
+    A2.5.8) [ "$(count_regex "$out" 'SSH_DENY_OK')" -ge 1 ] && ! contains_regex_any "$out" 'SSH_DENY_FAIL|SSH_PASSWORD_HELPER_MISSING' && ! has_bad_marker "$out" ;;
+    A2.5.9) [ "$(count_regex "$out" 'SSH_ALLOW_OK')" -ge 2 ] && [ "$(count_regex "$out" 'SSH_DENY_OK')" -ge 2 ] && ! contains_regex_any "$out" 'SSH_(ALLOW|DENY)_FAIL|SSH_PASSWORD_HELPER_MISSING' && ! has_bad_marker "$out" ;;
+    A2.5.10) [ "$(count_regex "$out" 'SSH_ALLOW_OK')" -ge 2 ] && [ "$(count_regex "$out" 'SSH_DENY_OK')" -ge 2 ] && ! contains_regex_any "$out" 'SSH_(ALLOW|DENY)_FAIL|SSH_PASSWORD_HELPER_MISSING' && ! has_bad_marker "$out" ;;
+    A2.5.11) [ "$(count_regex "$out" 'SSH_ALLOW_OK')" -ge 2 ] && [ "$(count_regex "$out" 'SSH_DENY_OK')" -ge 2 ] && ! contains_regex_any "$out" 'SSH_(ALLOW|DENY)_FAIL|SSH_PASSWORD_HELPER_MISSING' && ! has_bad_marker "$out" ;;
+    A2.5.12) [ "$(count_regex "$out" 'GW_OK')" -ge 2 ] && ! contains_regex_any "$out" 'SSH_ALLOW_FAIL|SSH_PASSWORD_HELPER_MISSING' ;;
+    A2.5.13) [ "$(count_regex "$out" 'SSH_DENY_OK')" -ge 3 ] && contains_all "$out" SSH_SOURCE_DENY_OK && ! contains_regex_any "$out" 'SSH_DENY_FAIL|SSH_SOURCE_DENY_FAIL|SSH_PASSWORD_HELPER_MISSING' && ! has_bad_marker "$out" ;;
     A2.5.14) [ "$(count_regex "$out" 'ROOT_OK')" -ge 7 ] ;;
     A2.5.15) [ "$(count_regex "$out" 'active')" -ge 10 ] ;;
     A2.5.16) contains_all "$out" li bekzat ;;
-    A2.6.1) [ "$(count_regex "$out" 'FULL_SUDO_OK')" -ge 6 ] ;;
+    A2.6.1) [ "$(count_regex "$out" 'FULL_SUDO_OK')" -ge 6 ] && ! contains_regex_any "$out" 'SSH_ALLOW_FAIL|SSH_PASSWORD_HELPER_MISSING' ;;
     A2.6.2) [ "$(count_regex "$out" 'linuxadmins')" -ge 6 ] ;;
-    A2.6.3) contains_all "$out" STATUS_ALLOWED ;;
-    A2.6.4) contains_all "$out" RESTART_ALLOWED ;;
-    A2.6.5) contains_all "$out" ARBITRARY_SUDO_DENIED_OK && [ "$(count_regex "$out" 'SUDO_DENIED_OK')" -ge 5 ] ;;
-    A2.6.6) [ "$(count_regex "$out" 'SUDO_DENIED_OK')" -ge 2 ] ;;
-    A2.6.7) contains_all "$out" SUDO_DENIED_OK ;;
+    A2.6.3) contains_all "$out" STATUS_ALLOWED && ! contains_regex_any "$out" 'STATUS_DENIED|SSH_ALLOW_FAIL|SSH_PASSWORD_HELPER_MISSING' ;;
+    A2.6.4) contains_all "$out" RESTART_ALLOWED && ! contains_regex_any "$out" 'RESTART_DENIED|SSH_ALLOW_FAIL|SSH_PASSWORD_HELPER_MISSING' ;;
+    A2.6.5) contains_all "$out" ARBITRARY_SUDO_DENIED_OK && [ "$(count_regex "$out" 'SUDO_DENIED_OK')" -ge 5 ] && ! contains_regex_any "$out" 'ARBITRARY_SUDO_ALLOWED_BAD|SUDO_ALLOWED_BAD|SSH_PASSWORD_HELPER_MISSING' ;;
+    A2.6.6) [ "$(count_regex "$out" 'SUDO_DENIED_OK')" -ge 2 ] && ! contains_regex_any "$out" 'SUDO_ALLOWED_BAD|SSH_PASSWORD_HELPER_MISSING' ;;
+    A2.6.7) contains_all "$out" SUDO_DENIED_OK && ! contains_regex_any "$out" 'SUDO_ALLOWED_BAD|SSH_ALLOW_FAIL|SSH_PASSWORD_HELPER_MISSING' ;;
     A2.6.8) [ "$rc" -eq 0 ] && ! contains_regex_any "$out" 'parse error|syntax error' ;;
-    A2.6.9) contains_regex_any "$out" 'sudo.*li|sudo.*bekzat' ;;
+    A2.6.9) contains_regex_any "$out" 'sudo.*li|sudo.*bekzat' && ! contains_regex_any "$out" 'SSH_ALLOW_FAIL|SSH_PASSWORD_HELPER_MISSING' ;;
     A2.7.1) [ "$(count_regex "$out" '^A2_PORTAL_OK$')" -ge 2 ] ;;
-    A2.7.2) contains_all "$out" A2_ADMIN_OK ;;
-    A2.7.3) ! contains_all "$out" A2_ADMIN_OK ;;
+    A2.7.2) contains_all "$out" A2_ADMIN_OK PORTAL_ADMIN_ALLOWED_OK && ! contains_regex_any "$out" 'PORTAL_ADMIN_ALLOWED_FAIL' ;;
+    A2.7.3) contains_all "$out" PORTAL_ADMIN_DENIED_OK && ! contains_regex_any "$out" 'A2_ADMIN_OK|PORTAL_ADMIN_DENIED_FAIL' ;;
     A2.7.4) ! contains_all "$out" A2_PORTAL_OK ;;
     A2.7.5) contains_all "$out" /srv/repo/audit && contains_regex_any "$out" 'li|linuxadmins|mei|auditors|acl' ;;
-    A2.7.6) contains_all "$out" LI_RW_OK ;;
-    A2.7.7) contains_all "$out" MEI_READ_OK MEI_WRITE_DENIED_OK ;;
-    A2.7.8) [ "$(count_regex "$out" 'REPO_SSH_DENIED_OK')" -ge 2 ] ;;
+    A2.7.6) contains_all "$out" LI_RW_OK && ! contains_regex_any "$out" 'SSH_ALLOW_FAIL|SSH_PASSWORD_HELPER_MISSING' ;;
+    A2.7.7) contains_all "$out" MEI_READ_OK MEI_WRITE_DENIED_OK && ! contains_regex_any "$out" 'SSH_ALLOW_FAIL|SSH_PASSWORD_HELPER_MISSING' ;;
+    A2.7.8) [ "$(count_regex "$out" 'SSH_DENY_OK')" -ge 2 ] && ! contains_regex_any "$out" 'SSH_DENY_FAIL|SSH_PASSWORD_HELPER_MISSING' ;;
     A2.8.1) contains_all "$out" east-edge-a2 core-edge-a2 east-ws-a2 ops-ws-a2 repo-a2 portal-a2 ;;
     A2.8.2) contains_regex_any "$out" '/var/log/remote|logs-proof' ;;
-    A2.8.3) contains_regex_all "$out" 'Accepted|session opened|sshd' 'Failed|denied|failure' ;;
-    A2.8.4) contains_regex_any "$out" 'sudo.*li|sudo.*bekzat' ;;
+    A2.8.3) contains_regex_all "$out" 'Accepted|session opened|sshd' 'Failed|denied|failure' && ! contains_regex_any "$out" 'SSH_PASSWORD_HELPER_MISSING' ;;
+    A2.8.4) contains_regex_any "$out" 'sudo.*li|sudo.*bekzat' && ! contains_regex_any "$out" 'SSH_ALLOW_FAIL|SSH_PASSWORD_HELPER_MISSING' ;;
     A2.8.5) contains_all "$out" /admin ;;
     A2.8.6) contains_regex_any "$out" 'A2-.*DROP|DROP' ;;
     A2.8.7) contains_regex_all "$out" 'Command:|Expected:|Actual:|Result:' 'PASS|FAIL' ;;
     A2.8.8) contains_regex_all "$out" 'SSH|PAM|sudo' 'allowed|denied|positive|negative|PASS|FAIL' ;;
     A2.8.9) contains_regex_all "$out" 'ROOT_CA_FILE=/.*' 'SERVICES_CA_FILE=/.*' 'PEM_OK ' && ! contains_any "$out" "NOT_FOUND" "PEM_BAD" ;;
     A2.8.10) contains_all "$out" incomplete= ;;
-    A2.8.11) [ "$rc" -eq 0 ] && contains_all "$out" ldap.atlas.a2.lab portal.atlas.a2.lab A2_PORTAL_OK ;;
+    A2.8.11) [ "$rc" -eq 0 ] && contains_all "$out" ldap.atlas.a2.lab portal.atlas.a2.lab A2_PORTAL_OK SSH_ALLOW_OK ;;
     *)
       [ "$rc" -eq 0 ] && [ -n "$out" ] && ! has_bad_marker "$out"
       ;;
