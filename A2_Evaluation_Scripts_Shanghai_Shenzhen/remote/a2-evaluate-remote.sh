@@ -217,6 +217,33 @@ ssh() {
     command ssh -n "${base[@]}" "${args[@]}" "$dest" "$@"
   fi
 }
+a2_cert_pem_files() {
+  find "${1:-/opt/grading/a2/pki}" -maxdepth 2 -type f -name '*.pem' 2>/dev/null | sort
+}
+a2_find_pem_by_subject_cn() {
+  local cn="$1"
+  local dir="${2:-/opt/grading/a2/pki}"
+  local f subject
+  while IFS= read -r f; do
+    subject="$(openssl x509 -in "$f" -noout -subject 2>/dev/null)" || continue
+    case "$subject" in
+      *"CN = $cn"*|*"CN=$cn"*) printf '%s\n' "$f"; return 0 ;;
+    esac
+  done < <(a2_cert_pem_files "$dir")
+  return 1
+}
+a2_find_pem_by_san_dns() {
+  local dns="$1"
+  local dir="${2:-/opt/grading/a2/pki}"
+  local f san
+  while IFS= read -r f; do
+    san="$(openssl x509 -in "$f" -noout -ext subjectAltName 2>/dev/null)" || continue
+    printf '%s\n' "$san" | grep -Fq "DNS:$dns" || continue
+    printf '%s\n' "$f"
+    return 0
+  done < <(a2_cert_pem_files "$dir")
+  return 1
+}
 export A2_PASS A2_READER_PASS A2_BASE_DN A2_BIND_DN A2_READER_DN A2_TIMEOUT
 EOS
   printf "\n%s\n" "$command" >> "$tmp"
@@ -244,7 +271,7 @@ filter_output_for_display() {
   local out="$1"
   local filtered line_count filtered_count
   local evidence_re
-  evidence_re='OK|FAIL|BAD|DENIED|allowed|denied|refused|timed out|No route|Permission denied|error|invalid|not found|No such|packet loss|bytes from|Time zone|Locale|Keymap|default|10\.22\.|203\.0\.113\.|2001:db8:a2|east-|core-|ops-|repo-|auth-|portal-|atlas\.a2\.lab|SOA|CNAME|SRV|PTR|flags:|:53|subject=|issuer=|CA:|DNS:|Verify return code|keyUsage|dn:|ou:|cn:|uid:|uidNumber:|gidNumber:|memberUid|USER_GROUPS|namingContexts|userPassword|authzid|result:|slapd|bind9|named|sssd|ldap_|sudo|linuxadmins|operators|auditors|engineers|portalusers|nginx|apache|HTTP_CODE|A2_|/srv/repo/audit|acl|Accepted|Failed|sshd|/admin|DROP|Command:|Expected:|Actual:|Result:|incomplete='
+  evidence_re='OK|FAIL|BAD|DENIED|allowed|denied|refused|timed out|No route|Permission denied|error|invalid|not found|No such|packet loss|bytes from|Time zone|Locale|Keymap|default|10\.22\.|203\.0\.113\.|2001:db8:a2|east-|core-|ops-|repo-|auth-|portal-|atlas\.a2\.lab|SOA|CNAME|SRV|PTR|flags:|:53|subject=|issuer=|CA:|DNS:|Verify return code|keyUsage|ROOT_CA_FILE|SERVICES_CA_FILE|LDAP_CERT_SOURCE|PORTAL_CERT_SOURCE|PEM_OK|PEM_BAD|dn:|ou:|cn:|uid:|uidNumber:|gidNumber:|memberUid|USER_GROUPS|namingContexts|userPassword|authzid|result:|slapd|bind9|named|sssd|ldap_|sudo|linuxadmins|operators|auditors|engineers|portalusers|nginx|apache|HTTP_CODE|A2_|/srv/repo/audit|acl|Accepted|Failed|sshd|/admin|DROP|Command:|Expected:|Actual:|Result:|incomplete='
 
   line_count="$(printf "%s\n" "$out" | wc -l | tr -d ' ')"
   filtered="$(printf "%s\n" "$out" | grep -Ei "$evidence_re" | sed -n '1,160p' || true)"
@@ -276,7 +303,8 @@ evaluate_result() {
     A2.1.5) contains_all "$out" 2001:db8:a2:10 2001:db8:a2:20 2001:db8:a2:30 2001:db8:a2:40 ;;
     A2.1.6) [ "$(count_regex "$out" 'net\.ipv4\.ip_forward *= *1')" -ge 2 ] ;;
     A2.1.7) [ "$(count_regex "$out" 'net\.ipv6\.conf\.all\.forwarding *= *1')" -ge 2 ] ;;
-    A2.1.8|A2.1.9) [ "$rc" -eq 0 ] && [ "$(count_regex "$out" '0% packet loss|0\.0% packet loss')" -ge 3 ] ;;
+    A2.1.8) [ "$rc" -eq 0 ] && contains_all "$out" "TCP_OK SH_to_auth_ldap_v4" "TCP_OK SH_to_portal_https_v4" "TCP_OK SH_to_dns_tcp_v4" "TCP_OK SZ_to_east_ssh_v4" ;;
+    A2.1.9) [ "$rc" -eq 0 ] && contains_all "$out" "TCP_OK SH_to_auth_ldap_v6" "TCP_OK SH_to_portal_https_v6" "TCP_OK SZ_to_east_ssh_v6" ;;
     A2.1.10) printf "%s\n" "$out" | grep -Fq "10.22.10.20" ;;
     A2.1.11) contains_all "$out" Europe/Paris en_US.UTF-8 && contains_regex_any "$out" 'VC Keymap: *us|X11 Layout: *us|Keymap: *us' ;;
     A2.1.12) [ "$(count_regex "$out" 'ROOT_SSH_OK')" -ge 7 ] ;;
@@ -293,7 +321,7 @@ evaluate_result() {
     A2.2.11) contains_all "$out" 10.22.10.1 203.0.113.10 203.0.113.20 10.22.20.1 10.22.30.1 10.22.40.1 ;;
     A2.3.1) contains_all "$out" "Atlas A2 Root CA" "CA:TRUE" && contains_regex_all "$out" 'keyCertSign' 'cRLSign' ;;
     A2.3.2) contains_all "$out" "Atlas A2 Services CA" "OK" "CA:TRUE" ;;
-    A2.3.3) [ "$rc" -eq 0 ] && contains_all "$out" root-ca.pem services-ca.pem ;;
+    A2.3.3) [ "$rc" -eq 0 ] && contains_regex_all "$out" 'ROOT_CA_FILE=/.*' 'SERVICES_CA_FILE=/.*' 'PEM_OK ' && ! contains_any "$out" "NOT_FOUND" "PEM_BAD" ;;
     A2.3.4) contains_all "$out" "DNS:auth-a2.atlas.a2.lab" "DNS:ldap.atlas.a2.lab" "DNS:ca.atlas.a2.lab" ;;
     A2.3.5) contains_all "$out" "DNS:portal-a2.atlas.a2.lab" "DNS:portal.atlas.a2.lab" ;;
     A2.3.6) contains_all "$out" "dn:" "Verify return code: 0" ;;
@@ -301,7 +329,7 @@ evaluate_result() {
     A2.3.8) contains_all "$out" ldap_id_use_start_tls ldap_tls_reqcert ldap_tls_cacert ;;
     A2.3.9) [ "$(count_regex "$out" 'HTTPS_OK')" -ge 2 ] ;;
     A2.3.10) [ -n "$out" ] && ! contains_regex_any "$out" '^-...r..r..|^-......r..' ;;
-    A2.3.11) contains_regex_any "$out" ': OK|OK$' ;;
+    A2.3.11) [ "$rc" -eq 0 ] && contains_regex_all "$out" 'ROOT_CA_FILE=/.*' 'SERVICES_CA_FILE=/.*' 'LDAP_CERT_SOURCE=' 'PORTAL_CERT_SOURCE=' && [ "$(count_regex "$out" ': OK|OK$')" -ge 2 ] ;;
     A2.3.12) contains_all "$out" "dn:" "A2_PORTAL_OK" ;;
     A2.4.1) contains_all "$out" "dn: dc=atlas,dc=a2,dc=lab" ;;
     A2.4.2) contains_all "$out" "ou: People" "ou: Groups" "ou: ServiceAccounts" ;;
@@ -358,7 +386,7 @@ evaluate_result() {
     A2.8.6) contains_regex_any "$out" 'A2-.*DROP|DROP' ;;
     A2.8.7) contains_regex_all "$out" 'Command:|Expected:|Actual:|Result:' 'PASS|FAIL' ;;
     A2.8.8) contains_regex_all "$out" 'SSH|PAM|sudo' 'allowed|denied|positive|negative|PASS|FAIL' ;;
-    A2.8.9) contains_all "$out" root-ca.pem ;;
+    A2.8.9) contains_regex_all "$out" 'ROOT_CA_FILE=/.*' 'SERVICES_CA_FILE=/.*' 'PEM_OK ' && ! contains_any "$out" "NOT_FOUND" "PEM_BAD" ;;
     A2.8.10) contains_all "$out" incomplete= ;;
     A2.8.11) [ "$rc" -eq 0 ] && contains_all "$out" ldap.atlas.a2.lab portal.atlas.a2.lab A2_PORTAL_OK ;;
     *)

@@ -332,11 +332,11 @@ check_client() {
       warn "A2.8.7" "0.25" "данные checks.txt не найдены или неполные"
     fi
 
-    run_capture "A2.8.9" "файлы подтверждения PKI" "find /root /home /opt -maxdepth 4 -type f \\( -name 'root-ca.pem' -o -name 'services-ca.pem' -o -name '*ca*.pem' \\) 2>/dev/null | head -40"
-    if contains_all "$A2_LAST_OUT" "root-ca.pem"; then
-      pass "A2.8.9" "0.15" "файлы подтверждения PKI найдены"
+    run_capture "A2.8.9" "файлы подтверждения PKI" "while IFS= read -r f; do if openssl x509 -in \"\$f\" -noout >/dev/null 2>&1; then subject=\$(openssl x509 -in \"\$f\" -noout -subject 2>/dev/null); echo \"PEM_OK \$f \$subject\"; else echo \"PEM_BAD \$f\"; fi; done < <(find /opt/grading/a2/pki /root /home -maxdepth 4 -type f -name '*.pem' 2>/dev/null | sort)"
+    if contains_all "$A2_LAST_OUT" "Atlas A2 Root CA" "Atlas A2 Services CA" && ! contains_any "$A2_LAST_OUT" "PEM_BAD"; then
+      pass "A2.8.9" "0.15" "Root CA и Services CA найдены среди PEM-файлов по Subject CN"
     else
-      warn "A2.8.9" "0.15" "файлы подтверждения PKI не найдены на ops-ws-a2"
+      warn "A2.8.9" "0.15" "Root CA/Services CA не найдены среди PEM-файлов на ops-ws-a2 или есть невалидный PEM"
     fi
   fi
 }
