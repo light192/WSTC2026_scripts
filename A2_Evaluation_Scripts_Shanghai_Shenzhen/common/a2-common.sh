@@ -12,7 +12,7 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 A2_DOMAIN="${A2_DOMAIN:-atlas.a2.lab}"
-A2_PASS="${A2_PASS:-Skill39@A2}"
+A2_PASS="${A2_PASS:-Skill39@A1}"
 A2_READER_PASS="${A2_READER_PASS:-Skill39@A2reader}"
 A2_BASE_DN="${A2_BASE_DN:-dc=atlas,dc=a2,dc=lab}"
 A2_BIND_DN="${A2_BIND_DN:-cn=admin,${A2_BASE_DN}}"

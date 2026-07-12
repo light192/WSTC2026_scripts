@@ -27,7 +27,7 @@ usage() {
   -h, --help               Показать эту справку.
 
 Переменные окружения:
-  A2_PASS                  Пароль LDAP-пользователей, по умолчанию Skill39@A2.
+  A2_PASS                  Пароль LDAP-пользователей, по умолчанию Skill39@A1.
   A2_READER_PASS           Пароль ldap-reader, по умолчанию Skill39@A2reader.
   A2_TIMEOUT               Таймаут SSH-подключения, по умолчанию 6.
   A2_CMD_TIMEOUT           Таймаут команды на критерий, по умолчанию 180.
@@ -209,7 +209,7 @@ ssh() {
     base+=(-o BatchMode=yes -o NumberOfPasswordPrompts=0)
   fi
   if [ "$user" != "root" ] && [ "$batch" -eq 0 ] && command -v sshpass >/dev/null 2>&1; then
-    command sshpass -p "${A2_PASS:-Skill39@A2}" ssh -n "${base[@]}" "${args[@]}" "$dest" "$@"
+    command sshpass -p "${A2_PASS:-Skill39@A1}" ssh -n "${base[@]}" "${args[@]}" "$dest" "$@"
   else
     if [ "$user" != "root" ] && [ "$batch" -eq 0 ]; then
       base+=(-o BatchMode=yes -o NumberOfPasswordPrompts=0)
@@ -271,7 +271,7 @@ filter_output_for_display() {
   local out="$1"
   local filtered line_count filtered_count
   local evidence_re
-  evidence_re='OK|FAIL|BAD|DENIED|allowed|denied|refused|timed out|No route|Permission denied|error|invalid|not found|No such|packet loss|bytes from|Time zone|Locale|Keymap|default|10\.22\.|203\.0\.113\.|2001:db8:a2|east-|core-|ops-|repo-|auth-|portal-|atlas\.a2\.lab|SOA|CNAME|SRV|PTR|flags:|:53|subject=|issuer=|CA:|DNS:|Verify return code|keyUsage|ROOT_CA_FILE|SERVICES_CA_FILE|LDAP_CERT_SOURCE|PORTAL_CERT_SOURCE|PEM_OK|PEM_BAD|dn:|ou:|cn:|uid:|uidNumber:|gidNumber:|memberUid|USER_GROUPS|namingContexts|userPassword|authzid|result:|slapd|bind9|named|sssd|ldap_|sudo|linuxadmins|operators|auditors|engineers|portalusers|nginx|apache|HTTP_CODE|A2_|/srv/repo/audit|acl|Accepted|Failed|sshd|/admin|DROP|Command:|Expected:|Actual:|Result:|incomplete='
+  evidence_re='OK|FAIL|BAD|DENIED|allowed|denied|refused|timed out|No route|Permission denied|error|invalid|not found|No such|packet loss|bytes from|Time zone|Locale|Keymap|default|10\.22\.|203\.0\.113\.|2001:db8:a2|east-|core-|ops-|repo-|auth-|portal-|atlas\.a2\.lab|SOA|CNAME|SRV|PTR|flags:|status:|:53|subject=|issuer=|CA:|DNS:|DNS_RECURSION|Verify return code|keyUsage|ROOT_CA_FILE|SERVICES_CA_FILE|LDAP_CERT_SOURCE|PORTAL_CERT_SOURCE|PEM_OK|PEM_BAD|dn:|ou:|cn:|uid:|uidNumber:|gidNumber:|memberUid|USER_GROUPS|namingContexts|userPassword|authzid|result:|slapd|bind9|named|sssd|ldap_|sudo|linuxadmins|operators|auditors|engineers|portalusers|nginx|apache|HTTP_CODE|A2_|/srv/repo/audit|acl|Accepted|Failed|sshd|/admin|DROP|Command:|Expected:|Actual:|Result:|incomplete='
 
   line_count="$(printf "%s\n" "$out" | wc -l | tr -d ' ')"
   filtered="$(printf "%s\n" "$out" | grep -Ei "$evidence_re" | sed -n '1,160p' || true)"
@@ -315,7 +315,7 @@ evaluate_result() {
     A2.2.5) contains_all "$out" 389 auth-a2 ;;
     A2.2.6) [ "$(count_regex "$out" 'atlas\.a2\.lab')" -ge 8 ] ;;
     A2.2.7) contains_all "$out" portal.atlas.a2.lab ldap.atlas.a2.lab && contains_regex_any "$out" '10\.22\.40\.10|auth-a2|dns' ;;
-    A2.2.8) [ -n "$out" ] && ! contains_regex_any "$out" 'timed out|connection refused|no servers could be reached' ;;
+    A2.2.8) contains_all "$out" "DNS_RECURSION_OK SH-LAN" "DNS_RECURSION_OK SZ-CLIENT" && ! contains_any "$out" "DNS_RECURSION_FAIL" ;;
     A2.2.9) ! contains_regex_any "$out" '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' ;;
     A2.2.10) contains_regex_all "$out" 'enabled' 'active' ;;
     A2.2.11) contains_all "$out" 10.22.10.1 203.0.113.10 203.0.113.20 10.22.20.1 10.22.30.1 10.22.40.1 ;;
