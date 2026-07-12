@@ -600,10 +600,10 @@ evaluate_result() {
     A2.7.8) [ "$(count_regex "$out" 'SSH_DENY_OK')" -ge 2 ] && ! contains_regex_any "$out" 'SSH_DENY_FAIL|SSH_PASSWORD_HELPER_MISSING' ;;
     A2.8.1) contains_all "$out" east-edge-a2 core-edge-a2 east-ws-a2 ops-ws-a2 repo-a2 portal-a2 ;;
     A2.8.2) contains_regex_any "$out" '/var/log/remote|logs-proof' ;;
-    A2.8.3) contains_regex_all "$out" 'Accepted|session opened|sshd' 'Failed|denied|failure' && ! contains_regex_any "$out" 'SSH_PASSWORD_HELPER_MISSING' ;;
+    A2.8.3) contains_regex_all "$out" '(Accepted|session opened).*li|li.*(Accepted|session opened)' '(Failed|denied|failure|fatal|pam_access|Access denied).*aliya|aliya.*(Failed|denied|failure|fatal|pam_access|Access denied)' && ! contains_regex_any "$out" 'SSH_PASSWORD_HELPER_MISSING' ;;
     A2.8.4) contains_regex_any "$out" 'sudo.*li|sudo.*bekzat' && ! contains_regex_any "$out" 'SSH_ALLOW_FAIL|SSH_PASSWORD_HELPER_MISSING' ;;
     A2.8.5) contains_all "$out" /admin ;;
-    A2.8.6) contains_regex_any "$out" 'A2-.*DROP|DROP' ;;
+    A2.8.6) contains_all "$out" GATEWAY_DENY_OK && ! contains_all "$out" GATEWAY_DENY_FAIL ;;
     A2.8.7) contains_regex_all "$out" 'Command:|Expected:|Actual:|Result:' 'PASS|FAIL' ;;
     A2.8.8) contains_regex_all "$out" 'SSH|PAM|sudo' 'allowed|denied|positive|negative|PASS|FAIL' ;;
     A2.8.9) contains_regex_all "$out" 'ROOT_CA_FILE=/.*' 'SERVICES_CA_FILE=/.*' 'PEM_OK ' && ! contains_any "$out" "NOT_FOUND" "PEM_BAD" ;;
