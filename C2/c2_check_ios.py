@@ -177,6 +177,9 @@ ROUTED = {
 class Scorer:
     def __init__(self, consoles, creds):
         self.consoles = consoles; self.creds = creds; self.sessions = {}; self.cache = {}; self.results = []
+        self.current_aspect = ""
+        self.command_devices = []
+        self.command_records = []
     def connect(self):
         for dev in ["ISP1"] + DEVICES:
             if dev not in self.consoles: continue
@@ -187,17 +190,102 @@ class Scorer:
             except Exception as exc: print(f"{YELLOW}[!] {dev}: {exc}{NC}")
     def close(self):
         for s in self.sessions.values(): s.close()
+    def filtered_command(self, command):
+        """Add narrow IOS output filters without changing checker semantics."""
+        if "|" in command:
+            return command
+        filters = [
+            (r"^show hosts$", r"Default domain|domain name|Name/address lookup"),
+            (r"^show clock detail$", r"ALMT|UTC|GMT|Time source"),
+            (r"^show privilege$", r"Current privilege"),
+            (r"^show ip ssh$", r"SSH Enabled|version|Authentication timeout"),
+            (r"^show crypto key", r"Key name|Usage|bits|Modulus"),
+            (r"^show interfaces description$", r"up|down|admin"),
+            (r"^show vtp status$", r"Operating Mode|Domain Name"),
+            (r"^show interfaces trunk$", r"trunking|native|Vlans allowed|Po12|Gi"),
+            (r"^show etherchannel summary$", r"Po12|Gi1/0|Gi1/1"),
+            (r"^show lacp neighbor$", r"Gi1/0|Gi1/1|Partner|System"),
+            (r"^show spanning-tree mst configuration$", r"Name|Revision|^[ ]*[123][ ]"),
+            (r"^show spanning-tree mst \d+$", r"root|Root ID|Bridge ID|priority"),
+            (r"^show ip dhcp snooping$", r"enabled|Trusted|10|40|110|210"),
+            (r"^show ip arp inspection$", r"enabled|10|40|110|210|forward|drop"),
+            (r"^show standby", r"Vl|Active|Standby|Priority|Preemption|Track|Virtual IP"),
+            (r"^show ip ospf$", r"Routing Process|Router ID|stub|Area"),
+            (r"^show ip protocols$", r"Routing Protocol|Passive Interface|Gigabit|Vlan"),
+            (r"^show ip ospf neighbor$", r"FULL|Neighbor ID"),
+            (r"^show ip ospf interface brief$", r"Area|POINT_TO_POINT|Gi|Vl"),
+            (r"^show ip route ospf$", r"10\.80\.|10\.81\.|0\.0\.0\.0"),
+            (r"^show bgp ipv4 unicast summary$", r"Neighbor|203\.0\.113\."),
+            (r"^show bgp ipv4 unicast neighbors", r"BGP neighbor|remote AS|hold time|keepalive"),
+            (r"^show ip route bgp$", r"0\.0\.0\.0|10\.8[0-3]\.0\.0"),
+            (r"^show bgp ipv4 unicast$", r"Network|10\.8[0-3]\.0\.0|198\.51\.100\.(80|88)"),
+            (r"^show ip dhcp pool$", r"Pool|Leased|Total"),
+            (r"^show ntp associations$", r"10\.81\.130\.10|address"),
+            (r"^show ntp status$", r"Clock is|reference"),
+            (r"^show ip nat translations$", r"198\.51\.100\.(81|82|89)|10\.81\.130\.10"),
+            (r"^show ip nat statistics$", r"Total active|Outside interfaces|Inside interfaces"),
+            (r"^show cdp neighbors$", r"Device ID|IR|CR|DS|AS|BR"),
+            (r"^show logging$", r"10\.81\.130\.10|warnings|timestamp|msec"),
+            (r"^show snmp user", r"User name|Authentication Protocol|Privacy Protocol|security level|authPriv"),
+            (r"^show ip flow export$", r"10\.81\.130\.10|2055|Source|export"),
+            (r"^show flow exporter$", r"10\.81\.130\.10|2055|Source|export"),
+        ]
+        for pattern, include in filters:
+            if re.match(pattern, command, re.I):
+                return f"{command} | include {include}"
+        return command
     def cmd(self, dev, command):
+        command=self.filtered_command(command)
+        self.command_devices.append(dev)
         key=(dev,command)
         if key not in self.cache:
             if dev not in self.sessions: self.cache[key]=""
             else:
                 raw=self.sessions[dev].exec(command)
                 self.cache[key]=format_ios_output(raw,command)
-            print(f"{BLUE}{dev}# {command}{NC}\n{self.cache[key] or '(пустой вывод)'}")
+        self.command_records.append((dev,command,self.cache[key]))
         return self.cache[key]
+    def print_device_results(self, values):
+        devices=self.command_devices
+        if not devices:
+            return
+        labels=[]
+        if values and len(devices) % len(values) == 0:
+            width=len(devices)//len(values)
+            labels=[devices[(i+1)*width-1] for i in range(len(values))]
+        elif len(values)==len(dict.fromkeys(devices)):
+            labels=list(dict.fromkeys(devices))
+        elif len(set(devices))==1:
+            labels=[devices[0]]*len(values)
+        grouped=defaultdict(list)
+        order=[]
+        for dev,_,_ in self.command_records:
+            if dev not in order: order.append(dev)
+        for dev,value in zip(labels,values): grouped[dev].append(bool(value))
+        records=defaultdict(list)
+        seen=set()
+        for dev,command,output in self.command_records:
+            key=(dev,command)
+            if key in seen: continue
+            seen.add(key); records[dev].append((command,output))
+        print(f"\n{CYAN}Проверка по устройствам:{NC}")
+        for dev in order:
+            print(f"\n{BLUE}--- {dev} ---{NC}")
+            for command,output in records[dev]:
+                print(f"{BLUE}{dev}# {command}{NC}")
+                print(output or "(пустой вывод)")
+            device_values=grouped.get(dev,[])
+            if device_values:
+                passed=sum(device_values); total=len(device_values)
+                status="PASS" if passed==total else "PART" if passed else "FAIL"
+            else:
+                passed=sum(values); total=len(values)
+                status="PASS" if passed==total else "PART" if passed else "FAIL"
+            color={"PASS":GREEN,"PART":PURPLE,"FAIL":RED}[status]
+            print(f"  {color}{dev}: {status} ({passed}/{total}){NC}")
     def ratio(self, aid, tests, details=""):
         a=BY_ID[aid]; vals=[bool(x) for x in tests]; p=sum(vals); t=len(vals)
+        self.print_device_results(vals)
         status="PASS" if t and p==t else "PART" if p else "FAIL"
         self.results.append(Result(a,status,a.mark*p/t if t else 0,p,t,details))
     def skip(self, aid, why): self.results.append(Result(BY_ID[aid],"SKIP",0,details=why))
@@ -221,7 +309,7 @@ class Scorer:
         if result.details:
             print(f"  {result.details}")
     def ip_ok(self, dev, iface, ip):
-        out=self.cmd(dev,"show ip interface brief")
+        out=self.cmd(dev,rf"show ip interface brief | include ^{re.escape(iface)}[ ]")
         short=iface.replace("GigabitEthernet","Gi").replace("Loopback","Lo")
         return bool(re.search(rf"^(?:{re.escape(iface)}|{re.escape(short)})\s+{re.escape(ip)}\s+\S+\s+\S+\s+up\s+up\s*$",out,re.I|re.M))
     @staticmethod
@@ -233,6 +321,9 @@ class Scorer:
     def run(self, start, pause=True):
         plan=[a for a in ASPECTS if a.number >= start]
         for index,a in enumerate(plan):
+            self.current_aspect=a.id
+            self.command_devices=[]
+            self.command_records=[]
             print(f"\n{PURPLE}{'='*90}\n{a.number:03d} {a.id} — {a.title}\n{'='*90}{NC}")
             self.print_expected(a)
             result_count=len(self.results)
@@ -246,7 +337,7 @@ class Scorer:
     def check(self, aid):
         # Basic
         if aid=="A1": return self.ratio(aid,[bool(re.search(rf"(?mi)^{d}\s+uptime is",self.cmd(d,"show version | include uptime"))) for d in DEVICES])
-        if aid=="A2": return self.ratio(aid,[all("camp-c2.local" in self.cmd(d,"show hosts").lower() for d in DEVICES),all(self.has_all(self.cmd(d,"show clock detail"),r"ALMT",r"(?:UTC|GMT).*5|5.*hours") for d in DEVICES)])
+        if aid=="A2": return self.ratio(aid,["camp-c2.local" in self.cmd(d,"show hosts").lower() and self.has_all(self.cmd(d,"show clock detail"),r"ALMT",r"(?:UTC|GMT).*5|5.*hours") for d in DEVICES])
         if aid=="A3": return self.ratio(aid,["15" in self.cmd(d,"show privilege") for d in DEVICES],"Console login uses configured admin credentials")
         if aid=="A4": return self.ratio(aid,[self.has_all(self.cmd(d,"show ip ssh")+self.cmd(d,"show crypto key mypubkey rsa"),r"version 2",r"(?:2048|3072|4096) bits") for d in DEVICES])
         if aid=="A5": return self.skip(aid,"Требует SSH/Telnet tests с JUDGE-SRV")
