@@ -4,5 +4,7 @@
   "password": "checker",
   "device_username": "admin",
   "device_password": "Skill39@C2",
-  "enable_password": "Skill39@C2"
+  "enable_password": "Skill39@C2",
+  "server_username": "student",
+  "server_password": "StudentPass"
 }
