@@ -207,12 +207,23 @@ class Scorer:
         out=self.cmd(dev,"show ip interface brief")
         short=iface.replace("GigabitEthernet","Gi").replace("Loopback","Lo")
         return bool(re.search(rf"^(?:{re.escape(iface)}|{re.escape(short)})\s+{re.escape(ip)}\s+\S+\s+\S+\s+up\s+up\s*$",out,re.I|re.M))
-    def run(self, start):
+    @staticmethod
+    def pause_before_criterion(criterion):
+        try:
+            input(f"{YELLOW}\nКритерий {criterion} завершен. Нажмите Enter для перехода к следующему критерию...{NC}")
+        except EOFError:
+            pass
+    def run(self, start, pause=True):
+        previous_criterion=None
         for a in ASPECTS:
             if a.number < start: continue
+            criterion=a.id[0]
+            if pause and previous_criterion is not None and criterion != previous_criterion:
+                self.pause_before_criterion(previous_criterion)
             print(f"\n{PURPLE}{'='*90}\n{a.number:03d} {a.id} — {a.title}\n{'='*90}{NC}")
             try: self.check(a.id)
             except Exception as exc: self.results.append(Result(a,"FAIL",0,details=f"Ошибка checker: {exc}"))
+            previous_criterion=criterion
     def check(self, aid):
         # Basic
         if aid=="A1": return self.ratio(aid,[bool(re.search(rf"(?mi)^{d}\s+uptime is",self.cmd(d,"show version | include uptime"))) for d in DEVICES])
@@ -330,6 +341,7 @@ def args():
     p=argparse.ArgumentParser(description="WSC2026 C2 PNETLab IOS scorer")
     p.add_argument("--start",default="A",help="A-G, aspect ID (C7) or ordinal 1-100")
     p.add_argument("--lab",default="module-c",help="substring of running PNETLab lab name")
+    p.add_argument("--no-pause",action="store_true",help="не ждать Enter между критериями A-G")
     return p.parse_args()
 def start_number(s):
     s=s.upper()
@@ -346,7 +358,7 @@ def main():
         sid=get_running_session_id_by_substring(url,cookie,a.lab); join_session(url,sid,cookie)
         consoles=build_node_console_map(get_nodes(url,cookie).json())
         scorer=Scorer(consoles,creds)
-        try: scorer.connect(); scorer.run(start); scorer.report()
+        try: scorer.connect(); scorer.run(start,pause=not a.no_pause); scorer.report()
         finally: scorer.close()
     finally:
         try: logout(url)

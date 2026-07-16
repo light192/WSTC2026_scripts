@@ -27,6 +27,14 @@ python .\c2_check_ios.py --start 49
 python .\c2_check_ios.py --lab c2
 ```
 
+По умолчанию после завершения каждого критерия A–F скрипт ждет нажатия
+`Enter`, прежде чем перейти к следующему критерию. Для полностью
+автоматического запуска без пауз:
+
+```powershell
+python .\c2_check_ios.py --no-pause
+```
+
 ## Принципы оценки
 
 - Используются operational и dedicated show-команды; `show running-config` не используется.
