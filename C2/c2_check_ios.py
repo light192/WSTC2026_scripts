@@ -208,22 +208,19 @@ class Scorer:
         short=iface.replace("GigabitEthernet","Gi").replace("Loopback","Lo")
         return bool(re.search(rf"^(?:{re.escape(iface)}|{re.escape(short)})\s+{re.escape(ip)}\s+\S+\s+\S+\s+up\s+up\s*$",out,re.I|re.M))
     @staticmethod
-    def pause_before_criterion(criterion):
+    def pause_after_aspect(aspect_id):
         try:
-            input(f"{YELLOW}\nКритерий {criterion} завершен. Нажмите Enter для перехода к следующему критерию...{NC}")
+            input(f"{YELLOW}\nАспект {aspect_id} завершен. Нажмите Enter для следующего аспекта...{NC}")
         except EOFError:
             pass
     def run(self, start, pause=True):
-        previous_criterion=None
-        for a in ASPECTS:
-            if a.number < start: continue
-            criterion=a.id[0]
-            if pause and previous_criterion is not None and criterion != previous_criterion:
-                self.pause_before_criterion(previous_criterion)
+        plan=[a for a in ASPECTS if a.number >= start]
+        for index,a in enumerate(plan):
             print(f"\n{PURPLE}{'='*90}\n{a.number:03d} {a.id} — {a.title}\n{'='*90}{NC}")
             try: self.check(a.id)
             except Exception as exc: self.results.append(Result(a,"FAIL",0,details=f"Ошибка checker: {exc}"))
-            previous_criterion=criterion
+            if pause and index < len(plan)-1:
+                self.pause_after_aspect(a.id)
     def check(self, aid):
         # Basic
         if aid=="A1": return self.ratio(aid,[bool(re.search(rf"(?mi)^{d}\s+uptime is",self.cmd(d,"show version | include uptime"))) for d in DEVICES])
@@ -341,7 +338,7 @@ def args():
     p=argparse.ArgumentParser(description="WSC2026 C2 PNETLab IOS scorer")
     p.add_argument("--start",default="A",help="A-G, aspect ID (C7) or ordinal 1-100")
     p.add_argument("--lab",default="module-c",help="substring of running PNETLab lab name")
-    p.add_argument("--no-pause",action="store_true",help="не ждать Enter между критериями A-G")
+    p.add_argument("--no-pause",action="store_true",help="не ждать Enter после каждого аспекта")
     return p.parse_args()
 def start_number(s):
     s=s.upper()
