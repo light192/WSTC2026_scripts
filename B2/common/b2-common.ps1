@@ -1,4 +1,4 @@
-Set-StrictMode -Version Latest
+﻿Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:B2Root = Split-Path -Parent $PSScriptRoot
@@ -6,7 +6,7 @@ $script:B2CriteriaPath = Join-Path $script:B2Root 'criteria\b2_criteria_map.tsv'
 $script:B2PauseBetweenChecks = $true
 $script:B2ReportEnabled = $false
 $script:B2Rows = @()
-$script:B2Version = '2026-07-12.1'
+$script:B2Version = '2026-07-15.14'
 
 function ConvertTo-B2Text {
     param([object]$Value)
@@ -139,23 +139,32 @@ function Invoke-B2Evidence {
         [int]$ContextLines = 0
     )
     Write-B2Log "Команда: $Command" Cyan
+    $captured = New-Object System.Collections.Generic.List[object]
     try {
-        $value = & $ScriptBlock
+        & $ScriptBlock | ForEach-Object { [void]$captured.Add($_) }
+        $value = $captured.ToArray()
         $text = ConvertTo-B2Text $value
         if ([string]::IsNullOrWhiteSpace($text)) { $text = '(пустой вывод)' }
         $display = Select-B2RelevantOutput -Text $text -Terms $RelevantTerms -Pattern $RelevantPattern -ContextLines $ContextLines
+        Write-B2Log 'Фактический вывод (полный):' Blue
+        Write-B2Log $text Gray
         if ($display -ne $text) {
-            Write-B2Log 'Фактический вывод (только релевантные строки):' Blue
-        } else {
-            Write-B2Log 'Фактический вывод:' Blue
+            Write-B2Log 'Строки, использованные для автоматической проверки:' DarkBlue
+            Write-B2Log $display DarkGray
         }
-        Write-B2Log $display Gray
         return [pscustomobject]@{ Ok = $true; Text = $text; DisplayText = $display; Value = $value }
     } catch {
-        $text = "[ERROR] $($_.Exception.Message)"
-        Write-B2Log 'Фактический вывод:' Blue
+        $partialText = ConvertTo-B2Text $captured.ToArray()
+        $errorText = "[ERROR] $($_.Exception.Message)"
+        $text = if ([string]::IsNullOrWhiteSpace($partialText)) { $errorText } else { "$partialText$([Environment]::NewLine)$errorText" }
+        $display = Select-B2RelevantOutput -Text $text -Terms $RelevantTerms -Pattern $RelevantPattern -ContextLines $ContextLines
+        Write-B2Log 'Фактический вывод (включая данные до ошибки):' Blue
         Write-B2Log $text Red
-        return [pscustomobject]@{ Ok = $false; Text = $text; DisplayText = $text; Value = $null }
+        if ($display -ne $text) {
+            Write-B2Log 'Строки, использованные для автоматической проверки:' DarkBlue
+            Write-B2Log $display DarkGray
+        }
+        return [pscustomobject]@{ Ok = $false; Text = $text; DisplayText = $display; Value = $captured.ToArray() }
     }
 }
 
@@ -237,7 +246,17 @@ function Get-B2DnsEvidence {
     if (-not [string]::IsNullOrWhiteSpace($Server)) { $args.Server = $Server }
     $rows = @(Resolve-DnsName @args)
     foreach ($row in $rows) {
-        "Name=$($row.Name); Type=$($row.Type); IPAddress=$($row.IPAddress); NameHost=$($row.NameHost)"
+        $nameProperty = $row.PSObject.Properties['Name']
+        $typeProperty = $row.PSObject.Properties['Type']
+        $ipAddressProperty = $row.PSObject.Properties['IPAddress']
+        $nameHostProperty = $row.PSObject.Properties['NameHost']
+
+        $recordName = if ($null -ne $nameProperty) { [string]$nameProperty.Value } else { '' }
+        $recordType = if ($null -ne $typeProperty) { [string]$typeProperty.Value } else { '' }
+        $ipAddress = if ($null -ne $ipAddressProperty) { [string]$ipAddressProperty.Value } else { '' }
+        $nameHost = if ($null -ne $nameHostProperty) { [string]$nameHostProperty.Value } else { '' }
+
+        "Name=$recordName; Type=$recordType; IPAddress=$ipAddress; NameHost=$nameHost"
     }
 }
 
@@ -274,12 +293,30 @@ function Get-B2FirewallEvidence {
 }
 
 function Invoke-B2WebEvidence {
-    param([string]$Uri)
-    $response = Invoke-WebRequest -Uri $Uri -UseBasicParsing -TimeoutSec 12 -ErrorAction Stop
-    "Uri=$Uri; StatusCode=$($response.StatusCode); ContentLength=$($response.Content.Length)"
-    $plain = ($response.Content -replace '<[^>]+>', ' ' -replace '\s+', ' ').Trim()
-    if ($plain.Length -gt 500) { $plain = $plain.Substring(0, 500) }
-    "Content=$plain"
+    param([string]$Uri, [int]$MaxAttempts = 2)
+    $lastException = $null
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            $response = Invoke-WebRequest -Uri $Uri -UseBasicParsing -TimeoutSec 12 -ErrorAction Stop
+            "Attempt=$attempt/$MaxAttempts; Uri=$Uri; StatusCode=$($response.StatusCode); ContentLength=$($response.Content.Length)"
+            $plain = ($response.Content -replace '<[^>]+>', ' ' -replace '\s+', ' ').Trim()
+            if ($plain.Length -gt 500) { $plain = $plain.Substring(0, 500) }
+            "Content=$plain"
+            return
+        } catch {
+            $lastException = $_.Exception
+            "Attempt=$attempt/$MaxAttempts; Result=FAILED; Message=$($lastException.Message)"
+            if ($attempt -lt $MaxAttempts) { Start-Sleep -Seconds 2 }
+        }
+    }
+
+    $parsedUri = [uri]$Uri
+    $target = $parsedUri.Host
+    $port = if ($parsedUri.IsDefaultPort) { if ($parsedUri.Scheme -eq 'https') { 443 } else { 80 } } else { $parsedUri.Port }
+    $resolved = try { @([System.Net.Dns]::GetHostAddresses($target) | ForEach-Object { $_.IPAddressToString }) -join ',' } catch { 'DNS_ERROR' }
+    $tcp = try { Test-NetConnection -ComputerName $target -Port $port -InformationLevel Quiet -WarningAction SilentlyContinue } catch { $false }
+    "Uri=$Uri; Target=$target; ResolvedAddress=$resolved; Port=$port; TcpTestSucceeded=$tcp"
+    "ERROR=$($lastException.Message); ExceptionType=$($lastException.GetType().FullName)"
 }
 
 function Get-B2PortalCertDumpFromStore {
@@ -297,18 +334,46 @@ function Get-B2PortalCertDumpFromStore {
 }
 
 function Get-B2RemotePortalCertDump {
-    param([string]$HostName, [int]$Port = 443)
+    param([string]$HostName, [int]$Port = 443, [string]$DiagnosticDnsServer)
     $tcp = [System.Net.Sockets.TcpClient]::new()
     $ssl = $null
     $tmp = Join-Path $env:TEMP ("b2-{0}.cer" -f [guid]::NewGuid().ToString('N'))
     try {
-        $tcp.Connect($HostName, $Port)
+        try {
+            $systemRecords = @(Resolve-DnsName -Name $HostName -Type A -ErrorAction Stop)
+            $systemAddresses = @($systemRecords | ForEach-Object {
+                $property = $_.PSObject.Properties['IPAddress']
+                if ($null -ne $property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) { [string]$property.Value }
+            } | Select-Object -Unique)
+            if ($systemAddresses.Count -eq 0) { throw 'A record отсутствует в ответе системного DNS.' }
+        } catch {
+            $systemDnsError = $_.Exception.Message
+            $explicitResult = 'не проверялся'
+            if (-not [string]::IsNullOrWhiteSpace($DiagnosticDnsServer)) {
+                try {
+                    $explicitRecords = @(Resolve-DnsName -Name $HostName -Type A -Server $DiagnosticDnsServer -ErrorAction Stop)
+                    $explicitAddresses = @($explicitRecords | ForEach-Object {
+                        $property = $_.PSObject.Properties['IPAddress']
+                        if ($null -ne $property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) { [string]$property.Value }
+                    } | Select-Object -Unique)
+                    $explicitResult = if ($explicitAddresses.Count -gt 0) { $explicitAddresses -join ',' } else { 'A record отсутствует' }
+                } catch {
+                    $explicitResult = "ошибка: $($_.Exception.Message)"
+                }
+            }
+            throw "Системный DNS не разрешает $HostName ($systemDnsError). Явный запрос через ${DiagnosticDnsServer}: $explicitResult. Проверьте DNS client settings INET-CL01."
+        }
+
+        $connectAddress = $systemAddresses[0]
+        $tcp.Connect($connectAddress, $Port)
         $callback = [System.Net.Security.RemoteCertificateValidationCallback]{ param($sender,$certificate,$chain,$errors) return $true }
         $ssl = [System.Net.Security.SslStream]::new($tcp.GetStream(), $false, $callback)
         $ssl.AuthenticateAsClient($HostName)
         $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($ssl.RemoteCertificate)
         [System.IO.File]::WriteAllBytes($tmp, $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
-        return Invoke-B2NativeText @("certutil -dump `"$tmp`"")
+        $dump = Invoke-B2NativeText @("certutil -dump `"$tmp`"")
+        $dnsName = $cert.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::DnsName, $false)
+        return "RemoteCertificateHost=$HostName; SystemResolvedAddress=$($systemAddresses -join ','); ConnectedAddress=$connectAddress; Subject=$($cert.Subject); Issuer=$($cert.Issuer); DnsName=$dnsName; Thumbprint=$($cert.Thumbprint)`r`n$dump"
     } finally {
         if ($null -ne $ssl) { $ssl.Dispose() }
         $tcp.Dispose()
@@ -326,10 +391,40 @@ function Get-B2CertificateUrls {
     return $urls
 }
 
+function Get-B2CertificateExtensionUrlEvidence {
+    param([string]$Dump)
+    $section = ''
+    $seen = @{}
+    foreach ($line in @($Dump -split "`r?`n")) {
+        if ($line -match '^\s*(?:\d+\.){2,}\d+:\s+Flags\s*=') { $section = '' }
+        if ($line -match '(?i)CRL Distribution Points') {
+            $section = 'CDP'
+            continue
+        }
+        if ($line -match '(?i)Authority Information Access') {
+            $section = 'AIA'
+            continue
+        }
+        if ([string]::IsNullOrWhiteSpace($section) -or $line -notmatch '(?i)URL=(https?://\S+)') { continue }
+
+        $url = $matches[1].TrimEnd('.', ',', ')', ']', '}')
+        $evidence = "${section}_URL=$url"
+        if (-not $seen.ContainsKey($evidence)) {
+            $seen[$evidence] = $true
+            $evidence
+        }
+    }
+}
+
 function Test-B2PublishedCertificateUrls {
     param([string]$Dump, [string]$HostPattern)
-    $urls = @(Get-B2CertificateUrls -Dump $Dump -HostPattern $HostPattern)
-    if ($urls.Count -eq 0) { return 'PublishedUrls=NOT_FOUND' }
+    $allUrls = @(Get-B2CertificateUrls -Dump $Dump -HostPattern '')
+    "ExpectedUrlHostPattern=$HostPattern"
+    if ($allUrls.Count -eq 0) { return 'PublishedUrls=NOT_FOUND_IN_CERTIFICATE' }
+    foreach ($candidate in $allUrls) { "PublishedUrlCandidate=$candidate" }
+
+    $urls = @($allUrls | Where-Object { [string]::IsNullOrWhiteSpace($HostPattern) -or $_ -match $HostPattern })
+    if ($urls.Count -eq 0) { return 'PublishedUrls=NO_EXPECTED_HOST_MATCH' }
     foreach ($url in $urls) {
         try {
             $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 12 -ErrorAction Stop
@@ -359,24 +454,54 @@ function Test-B2AspectA {
     param([string]$HostKey, [string]$AspectID)
     switch ($AspectID) {
         'A1.01' {
-            $r = Invoke-B2Evidence 'Get-ADDomain; Get-ADDomainController -Filter *; Get-DhcpServerInDC; Get-DnsServerZone' {
-                $domain = Get-ADDomain
-                "DomainDNSRoot=$($domain.DNSRoot); NetBIOSName=$($domain.NetBIOSName)"
-                foreach ($dc in @(Get-ADDomainController -Filter *)) { "DomainController=$($dc.HostName); Site=$($dc.Site)" }
-                if (Get-Command Get-DhcpServerInDC -ErrorAction SilentlyContinue) {
-                    foreach ($dhcp in @(Get-DhcpServerInDC -ErrorAction SilentlyContinue)) { "DhcpServer=$($dhcp.DnsName); IP=$($dhcp.IPAddress)" }
-                } else {
-                    $config = (Get-ADRootDSE).ConfigurationNamingContext
-                    foreach ($dhcp in @(Get-ADObject -SearchBase "CN=NetServices,CN=Services,$config" -LDAPFilter '(objectClass=dhcpClass)' -Properties dhcpServers -ErrorAction SilentlyContinue)) {
-                        "DhcpServer=$($dhcp.Name); ADPath=$($dhcp.DistinguishedName); Values=$(@($dhcp.dhcpServers) -join ',')"
+            if ($HostKey -in @('SHA-DC01','BJ-DC02')) {
+                $expectedDc = $HostKey
+                $r = Invoke-B2Evidence 'Get-ADDomain; Get-ADDomainController -Identity $env:COMPUTERNAME; Get-DnsServerZone' {
+                    $domain = Get-ADDomain
+                    $dc = Get-ADDomainController -Identity $env:COMPUTERNAME
+                    "DomainDNSRoot=$($domain.DNSRoot); NetBIOSName=$($domain.NetBIOSName)"
+                    "DomainController=$($dc.HostName); Enabled=$($dc.Enabled); IsReadOnly=$($dc.IsReadOnly); Site=$($dc.Site)"
+                    foreach ($zone in @(Get-DnsServerZone -ErrorAction SilentlyContinue)) {
+                        "DnsZone=$($zone.ZoneName); Type=$($zone.ZoneType); IsDsIntegrated=$($zone.IsDsIntegrated)"
                     }
+                } -RelevantTerms @('DomainDNSRoot','DomainController','DnsZone=nb-b2.local')
+                if ($r.Ok -and (Test-B2ContainsAll $r.Text @('DomainDNSRoot=nb-b2.local','NetBIOSName=NBB2',$expectedDc,'Enabled=True','DnsZone=nb-b2.local'))) {
+                    return New-B2Result PASS "$HostKey локально подтверждает состояние домена и DNS."
                 }
-                foreach ($zone in @(Get-DnsServerZone -ErrorAction SilentlyContinue)) { "DnsZone=$($zone.ZoneName); Type=$($zone.ZoneType)" }
-            } -RelevantTerms @('DomainDNSRoot','DomainController','DhcpServer','DnsZone')
-            if ($r.Ok -and (Test-B2ContainsAll $r.Text @('nb-b2.local','NBB2','SHA-DC01','BJ-DC02','DhcpServer=','DnsZone=nb-b2.local'))) {
-                return New-B2Result PASS 'Домен, оба DC/DNS и авторизованный DHCP подтверждены.'
+                return New-B2Result FAIL "$HostKey не подтвердил локальное состояние домена, контроллера домена или DNS-зоны."
             }
-            return New-B2Result FAIL 'Не подтверждён один из foundation-компонентов: домен, оба DC, DHCP или DNS-зона.'
+
+            if ($HostKey -eq 'SHA-FS01') {
+                $r = Invoke-B2Evidence 'Get-WindowsFeature DHCP; Get-Service DHCPServer; Get-DhcpServerSetting; Get-DhcpServerInDC; Get-DhcpServerv4Scope' {
+                    $feature = Get-WindowsFeature DHCP -ErrorAction SilentlyContinue
+                    "Feature=DHCP; InstallState=$($feature.InstallState)"
+                    $service = Get-Service DHCPServer -ErrorAction SilentlyContinue
+                    "Service=DHCPServer; Status=$($service.Status); StartType=$($service.StartType)"
+                    $setting = Get-DhcpServerSetting -ErrorAction SilentlyContinue
+                    if ($null -ne $setting) {
+                        "DhcpServerSetting=Local; IsDomainJoined=$($setting.IsDomainJoined); IsAuthorized=$($setting.IsAuthorized)"
+                    } else {
+                        'DhcpServerSetting=NOT_AVAILABLE'
+                    }
+                    try {
+                        foreach ($dhcp in @(Get-DhcpServerInDC -ErrorAction Stop)) {
+                            "AuthorizedDhcpServer=$($dhcp.DnsName); IP=$($dhcp.IPAddress)"
+                        }
+                    } catch {
+                        "DirectoryAuthorizationQuery=ERROR; Message=$($_.Exception.Message)"
+                    }
+                    foreach ($scope in @(Get-DhcpServerv4Scope -ErrorAction SilentlyContinue)) {
+                        "ScopeId=$($scope.ScopeId); Name=$($scope.Name); State=$($scope.State); StartRange=$($scope.StartRange); EndRange=$($scope.EndRange)"
+                    }
+                } -RelevantTerms @('InstallState','Service=DHCPServer','IsDomainJoined','IsAuthorized','AuthorizedDhcpServer','DirectoryAuthorizationQuery','ScopeId=','State=Active')
+                $authorizationOk = $r.Text -match 'IsAuthorized=True' -or $r.Text -match '(?i)AuthorizedDhcpServer=.*SHA-FS01'
+                if ($r.Ok -and $authorizationOk -and (Test-B2ContainsAll $r.Text @('InstallState=Installed','Status=Running','ScopeId=','State=Active'))) {
+                    return New-B2Result PASS 'SHA-FS01 локально подтверждает установленный, запущенный и авторизованный DHCP с активными scopes.'
+                }
+                return New-B2Result FAIL 'На SHA-FS01 не подтверждены роль DHCP, служба, авторизация в AD или активные scopes.'
+            }
+
+            return New-B2Result FAIL "Исходный аспект A1.01 не назначен хосту $HostKey."
         }
         'A1.02' {
             $expectedPrefix = if ($HostKey -eq 'SHA-CL01') { '10.22.30.' } else { '10.32.30.' }
@@ -397,7 +522,7 @@ function Test-B2AspectA {
             return New-B2Result FAIL 'Не подтверждены domain membership и DHCP-адрес из требуемой ClientNet.'
         }
         'A1.03' {
-            $r = Invoke-B2Evidence 'Resolve-DnsName sha-dc01.nb-b2.local, bj-dc02.nb-b2.local, bj-srv01.nb-b2.local' {
+            $r = Invoke-B2Evidence 'Resolve-DnsName sha-dc01.nb-b2.local; Resolve-DnsName bj-dc02.nb-b2.local; Resolve-DnsName bj-srv01.nb-b2.local' {
                 Get-B2DnsEvidence 'sha-dc01.nb-b2.local' ''
                 Get-B2DnsEvidence 'bj-dc02.nb-b2.local' ''
                 Get-B2DnsEvidence 'bj-srv01.nb-b2.local' ''
@@ -531,10 +656,22 @@ function Test-B2AspectC {
             return New-B2Result FAIL 'На этом хосте установлена запрещённая роль Certification Authority.'
         }
         'C1.03' {
-            $r = Invoke-B2Evidence 'certutil -config "BJ-SRV01\NB-B2-ENT-CA" -dump' {
-                Invoke-B2NativeText @('certutil -config "BJ-SRV01\NB-B2-ENT-CA" -dump')
-            } -RelevantTerms @('NB-B2-ENT-CA','Enterprise','Root CA','CA type','ExitCode=0') -ContextLines 1
-            if ($r.Ok -and (Test-B2ContainsAll $r.Text @('NB-B2-ENT-CA','ExitCode=0')) -and $r.Text -match 'Enterprise.*Root|Root.*Enterprise') {
+            $r = Invoke-B2Evidence 'Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\CertSvc\Configuration; certutil -getreg CA\CAType' {
+                $configurationPath = 'HKLM:\SYSTEM\CurrentControlSet\Services\CertSvc\Configuration'
+                $caName = (Get-ItemProperty -LiteralPath $configurationPath -Name Active -ErrorAction Stop).Active
+                $caConfiguration = Get-ItemProperty -LiteralPath (Join-Path $configurationPath $caName) -ErrorAction Stop
+                $caType = [int]$caConfiguration.CAType
+                $caTypeName = switch ($caType) {
+                    0 { 'Enterprise Root CA' }
+                    1 { 'Enterprise Subordinate CA' }
+                    3 { 'Standalone Root CA' }
+                    4 { 'Standalone Subordinate CA' }
+                    default { "Unknown CA type ($caType)" }
+                }
+                "CAName=$caName; CAType=$caType; CATypeName=$caTypeName"
+                Invoke-B2NativeText @('certutil -getreg CA\CAType')
+            } -RelevantTerms @('CAName=','CAType=','CATypeName=','CAType REG_DWORD','ExitCode=0') -ContextLines 1
+            if ($r.Ok -and (Test-B2ContainsAll $r.Text @('CAName=NB-B2-ENT-CA','CAType=0','CATypeName=Enterprise Root CA','ExitCode=0'))) {
                 return New-B2Result PASS 'Подтверждены имя и тип Enterprise Root CA.'
             }
             return New-B2Result FAIL 'Имя или тип CA не подтверждены.'
@@ -622,13 +759,28 @@ function Test-B2AspectD {
     param([string]$HostKey, [string]$AspectID)
     switch ($AspectID) {
         'D1.01' {
-            $r = Invoke-B2Evidence 'Get-WebVirtualDirectory | select Alias,PhysicalPath' {
-                Import-Module WebAdministration
-                foreach ($vdir in @(Get-WebVirtualDirectory | Where-Object { $_.Path -eq '/pki' -or $_.Name -match '/pki$' })) {
-                    "VirtualDirectory=$($vdir.Path); Name=$($vdir.Name); PhysicalPath=$($vdir.PhysicalPath)"
+            $r = Invoke-B2Evidence 'Get-WebVirtualDirectory | Select-Object Name,PhysicalPath' {
+                Import-Module WebAdministration -ErrorAction Stop
+                foreach ($vdir in @(Get-WebVirtualDirectory -ErrorAction Stop)) {
+                    $nameProperty = $vdir.PSObject.Properties['Name']
+                    $pathProperty = $vdir.PSObject.Properties['Path']
+                    $physicalPathProperty = $vdir.PSObject.Properties['PhysicalPath']
+
+                    $name = if ($null -ne $nameProperty) { [string]$nameProperty.Value } else { '' }
+                    $virtualPath = if ($null -ne $pathProperty) { [string]$pathProperty.Value } else { '' }
+                    $physicalPath = if ($null -ne $physicalPathProperty) { [string]$physicalPathProperty.Value } else { '' }
+
+                    if (-not [string]::IsNullOrWhiteSpace($name) -and $name.Trim('/') -ieq 'pki') {
+                        $virtualPath = '/pki'
+                    } elseif ([string]::IsNullOrWhiteSpace($virtualPath) -and -not [string]::IsNullOrWhiteSpace($name)) {
+                        $virtualPath = '/' + $name.Trim('/')
+                    }
+                    if ($virtualPath.TrimEnd('/') -ine '/pki') { continue }
+
+                    "Name=$name; VirtualPath=$virtualPath; PhysicalPath=$physicalPath"
                 }
-            } -RelevantTerms @('/pki','C:\PKI-Publish','PhysicalPath=')
-            if ($r.Ok -and (Test-B2ContainsAll $r.Text @('/pki','C:\PKI-Publish'))) { return New-B2Result PASS 'IIS /pki указывает на C:\PKI-Publish.' }
+            } -RelevantTerms @('Name=pki','VirtualPath=/pki','PhysicalPath=C:\PKI-Publish')
+            if ($r.Ok -and (Test-B2ContainsAll $r.Text @('VirtualPath=/pki','PhysicalPath=C:\PKI-Publish'))) { return New-B2Result PASS 'IIS /pki указывает на C:\PKI-Publish.' }
             return New-B2Result FAIL 'Virtual directory /pki отсутствует или указывает в другой каталог.'
         }
         'D1.02' {
@@ -647,7 +799,7 @@ function Test-B2AspectD {
                 "CertificateFile=$file"
                 $dump = Invoke-B2NativeText @("certutil -dump `"$file`"")
                 Test-B2PublishedCertificateUrls -Dump $dump -HostPattern 'pki\.nb-b2\.local'
-            } -RelevantTerms @('CertificateFile=','URL=','StatusCode=','ERROR=','PublishedUrls=')
+            } -RelevantTerms @('CertificateFile=','ExpectedUrlHostPattern=','PublishedUrlCandidate=','URL=','StatusCode=','ERROR=','PublishedUrls=')
             if ($r.Ok -and $r.Text -match '(?i)\.crl.*StatusCode=200' -and $r.Text -match '(?i)\.(crt|cer).*StatusCode=200' -and $r.Text -notmatch 'ERROR=') {
                 return New-B2Result PASS 'Конкретные CRL и CA certificate доступны по internal HTTP URL.'
             }
@@ -655,9 +807,9 @@ function Test-B2AspectD {
         }
         'D1.04' {
             $r = Invoke-B2Evidence 'Получить сертификат portal.b2.lab, извлечь CDP/AIA URL и запросить конкретные файлы pki.b2.lab' {
-                $dump = Get-B2RemotePortalCertDump 'portal.b2.lab'
+                $dump = Get-B2RemotePortalCertDump -HostName 'portal.b2.lab' -DiagnosticDnsServer '198.18.200.10'
                 Test-B2PublishedCertificateUrls -Dump $dump -HostPattern 'pki\.b2\.lab'
-            } -RelevantTerms @('URL=','StatusCode=','ERROR=','PublishedUrls=')
+            } -RelevantTerms @('RemoteCertificateHost=','ExpectedUrlHostPattern=','PublishedUrlCandidate=','URL=','StatusCode=','ERROR=','PublishedUrls=')
             if ($r.Ok -and $r.Text -match '(?i)\.crl.*StatusCode=200' -and $r.Text -match '(?i)\.(crt|cer).*StatusCode=200' -and $r.Text -notmatch 'ERROR=') {
                 return New-B2Result PASS 'Конкретные CRL и CA certificate доступны с INET-CL01.'
             }
@@ -665,21 +817,36 @@ function Test-B2AspectD {
         }
         { $_ -in @('D1.05','D1.06') } {
             $file = Get-B2PortalCertificateFile
-            $r = Invoke-B2Evidence 'certutil -dump C:\Temp\portal.cer | показать CDP/AIA HTTP URL' {
+            $r = Invoke-B2Evidence 'certutil -dump C:\Temp\portal.cer | извлечь строки CDP_URL и AIA_URL' {
                 if ([string]::IsNullOrWhiteSpace($file)) { throw 'Не найден portal.cer.' }
                 "CertificateFile=$file"
-                Invoke-B2NativeText @("certutil -dump `"$file`"")
-            } -RelevantPattern 'CertificateFile=|CRL Distribution|Authority Information|http://pki\.(nb-b2\.local|b2\.lab)/pki/' -ContextLines 1
+                $dump = Invoke-B2NativeText @("certutil -dump `"$file`"")
+                $urlEvidence = @(Get-B2CertificateExtensionUrlEvidence -Dump $dump)
+                if ($urlEvidence.Count -eq 0) { 'CertificateExtensionUrls=NOT_FOUND' } else { $urlEvidence }
+
+                $joined = $urlEvidence -join [Environment]::NewLine
+                $checks = [ordered]@{
+                    CDP_INTERNAL = $joined -match '(?i)CDP_URL=http://pki\.nb-b2\.local/pki/\S*\.crl(?:\s|$)'
+                    CDP_PUBLIC = $joined -match '(?i)CDP_URL=http://pki\.b2\.lab/pki/\S*\.crl(?:\s|$)'
+                    AIA_INTERNAL = $joined -match '(?i)AIA_URL=http://pki\.nb-b2\.local/pki/\S*\.(?:crt|cer)(?:\s|$)'
+                    AIA_PUBLIC = $joined -match '(?i)AIA_URL=http://pki\.b2\.lab/pki/\S*\.(?:crt|cer)(?:\s|$)'
+                }
+                foreach ($check in $checks.GetEnumerator()) {
+                    "$($check.Key)=$(if ($check.Value) { 'FOUND' } else { 'MISSING' })"
+                }
+                $exitLine = @($dump -split "`r?`n" | Where-Object { $_ -match '^ExitCode=' } | Select-Object -Last 1)
+                if ($exitLine.Count -gt 0) { $exitLine[0] } else { 'ExitCode=UNKNOWN' }
+            } -RelevantTerms @('CertificateFile=','CDP_URL=','AIA_URL=','CDP_INTERNAL=','CDP_PUBLIC=','AIA_INTERNAL=','AIA_PUBLIC=','ExitCode=')
             if ($AspectID -eq 'D1.05') {
-                if ($r.Ok -and (Test-B2ContainsAll $r.Text @('http://pki.nb-b2.local/pki/','http://pki.b2.lab/pki/')) -and $r.Text -match '(?i)\.crl') {
+                if ($r.Ok -and (Test-B2ContainsAll $r.Text @('CDP_INTERNAL=FOUND','CDP_PUBLIC=FOUND','ExitCode=0'))) {
                     return New-B2Result PASS 'CDP содержит оба требуемых HTTP URL.'
                 }
                 return New-B2Result FAIL 'В CDP отсутствует internal или simulated public URL.'
             }
-            if ($r.Ok -and $r.Text -match '(?i)Authority Information|AIA' -and $r.Text -match '(?i)http://pki\.(nb-b2\.local|b2\.lab)/pki/.*\.(crt|cer)') {
-                return New-B2Result PASS 'AIA содержит HTTP URL CA certificate.'
+            if ($r.Ok -and (Test-B2ContainsAll $r.Text @('AIA_INTERNAL=FOUND','AIA_PUBLIC=FOUND','ExitCode=0'))) {
+                return New-B2Result PASS 'AIA содержит internal и simulated public HTTP URL CA certificate.'
             }
-            return New-B2Result FAIL 'В AIA не найден доступный HTTP URL CA certificate.'
+            return New-B2Result FAIL 'В AIA отсутствует internal или simulated public HTTP URL CA certificate.'
         }
         'D1.07' {
             if ($HostKey -eq 'SHA-CL01') {
@@ -693,11 +860,11 @@ function Test-B2AspectD {
                 }
                 return New-B2Result FAIL 'certutil обнаружил ошибку chain/revocation.'
             }
-            $r = Invoke-B2Evidence 'Invoke-WebRequest https://portal.b2.lab; получить CDP/AIA из сертификата и проверить URL' {
+            $r = Invoke-B2Evidence 'Invoke-WebRequest -Uri https://portal.b2.lab -UseBasicParsing -TimeoutSec 12; получить CDP/AIA из сертификата и проверить URL' {
                 Invoke-B2WebEvidence 'https://portal.b2.lab'
-                $dump = Get-B2RemotePortalCertDump 'portal.b2.lab'
+                $dump = Get-B2RemotePortalCertDump -HostName 'portal.b2.lab' -DiagnosticDnsServer '198.18.200.10'
                 Test-B2PublishedCertificateUrls -Dump $dump -HostPattern 'pki\.b2\.lab'
-            } -RelevantTerms @('StatusCode=','URL=','ERROR=','PublishedUrls=')
+            } -RelevantTerms @('RemoteCertificateHost=','ExpectedUrlHostPattern=','PublishedUrlCandidate=','StatusCode=','URL=','ERROR=','PublishedUrls=')
             if ($r.Ok -and $r.Text -match 'Uri=https://portal\.b2\.lab; StatusCode=200' -and $r.Text -match 'URL=.*StatusCode=200' -and $r.Text -notmatch 'ERROR=') {
                 return New-B2Result PASS 'Внешний клиент доверяет порталу и получает CDP/AIA.'
             }
@@ -729,20 +896,71 @@ function Test-B2AspectE {
             return New-B2Result WARN 'Вывод шаблона показан; проверьте Digital Signature/Key Encipherment, EKU, key length и Supply in request.'
         }
         'E1.03' {
-            $r = Invoke-B2Evidence 'Get-Acl AD:\<NB-B2-WebServer template DN>' {
-                Import-Module ActiveDirectory
-                $root = Get-ADRootDSE
-                $template = Get-ADObject -SearchBase "CN=Certificate Templates,CN=Public Key Services,CN=Services,$($root.configurationNamingContext)" -LDAPFilter '(displayName=NB-B2-WebServer)'
-                "TemplateDN=$($template.DistinguishedName)"
-                foreach ($ace in @((Get-Acl ("AD:\" + $template.DistinguishedName)).Access | Where-Object { $_.IdentityReference -match 'GG_B2_Web_Enroll|Domain Admins' })) {
-                    "Identity=$($ace.IdentityReference); Rights=$($ace.ActiveDirectoryRights); Type=$($ace.AccessControlType); ObjectType=$($ace.ObjectType)"
+            $r = Invoke-B2Evidence 'Прочитать ACL шаблона NB-B2-WebServer через System.DirectoryServices; fallback: certutil -v -dstemplate NB-B2-WebServer' {
+                try {
+                    $rootDse = [ADSI]'LDAP://RootDSE'
+                    $configurationNc = [string]$rootDse.Properties['configurationNamingContext'][0]
+                    $defaultNc = [string]$rootDse.Properties['defaultNamingContext'][0]
+                    $templateRoot = [ADSI]("LDAP://CN=Certificate Templates,CN=Public Key Services,CN=Services,$configurationNc")
+                    $templateSearch = New-Object System.DirectoryServices.DirectorySearcher($templateRoot)
+                    $templateSearch.Filter = '(&(objectClass=pKICertificateTemplate)(|(cn=NB-B2-WebServer)(displayName=NB-B2-WebServer)))'
+                    $templateSearch.SearchScope = [System.DirectoryServices.SearchScope]::OneLevel
+                    $templateResult = $templateSearch.FindOne()
+                    if ($null -eq $templateResult) { throw 'Шаблон NB-B2-WebServer не найден в Configuration partition.' }
+
+                    $templateEntry = $templateResult.GetDirectoryEntry()
+                    $templateEntry.Options.SecurityMasks = [System.DirectoryServices.SecurityMasks]::Dacl
+                    $templateEntry.RefreshCache(@('distinguishedName','nTSecurityDescriptor'))
+                    $templateDn = [string]$templateEntry.Properties['distinguishedName'][0]
+                    "TemplateDN=$templateDn"
+
+                    $groupSids = @{}
+                    foreach ($sam in @('GG_B2_Web_Enroll','Domain Admins')) {
+                        $groupRoot = [ADSI]("LDAP://$defaultNc")
+                        $groupSearch = New-Object System.DirectoryServices.DirectorySearcher($groupRoot)
+                        $groupSearch.Filter = "(&(objectClass=group)(sAMAccountName=$sam))"
+                        [void]$groupSearch.PropertiesToLoad.Add('objectSid')
+                        $groupResult = $groupSearch.FindOne()
+                        if ($null -ne $groupResult -and $groupResult.Properties['objectsid'].Count -gt 0) {
+                            $sid = [System.Security.Principal.SecurityIdentifier]::new([byte[]]$groupResult.Properties['objectsid'][0], 0)
+                            $groupSids[$sam] = $sid.Value
+                            "TargetIdentity=$sam; SID=$($sid.Value)"
+                        } else {
+                            "TargetIdentity=$sam; SID=NOT_FOUND"
+                        }
+                    }
+
+                    $enrollGuid = [guid]'0e10c968-78fb-11d2-90d4-00c04f79dc55'
+                    $genericAll = [System.DirectoryServices.ActiveDirectoryRights]::GenericAll
+                    $extendedRight = [System.DirectoryServices.ActiveDirectoryRights]::ExtendedRight
+                    $allow = [System.Security.AccessControl.AccessControlType]::Allow
+                    $webEnrollOk = $false
+                    $domainAdminsFull = $false
+                    $rules = $templateEntry.ObjectSecurity.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])
+                    foreach ($ace in @($rules)) {
+                        $sidValue = $ace.IdentityReference.Value
+                        $identity = try { $ace.IdentityReference.Translate([System.Security.Principal.NTAccount]).Value } catch { $sidValue }
+                        $isWebEnrollGroup = $identity -match '(?i)GG_B2_Web_Enroll$' -or $sidValue -eq $groupSids['GG_B2_Web_Enroll']
+                        $isDomainAdmins = $identity -match '(?i)Domain Admins$' -or $sidValue -eq $groupSids['Domain Admins']
+                        if (-not $isWebEnrollGroup -and -not $isDomainAdmins) { continue }
+
+                        $hasGenericAll = (($ace.ActiveDirectoryRights -band $genericAll) -eq $genericAll)
+                        $hasEnroll = (($ace.ActiveDirectoryRights -band $extendedRight) -ne 0 -and $ace.ObjectType -eq $enrollGuid) -or $hasGenericAll
+                        if ($ace.AccessControlType -eq $allow -and $isWebEnrollGroup -and $hasEnroll) { $webEnrollOk = $true }
+                        if ($ace.AccessControlType -eq $allow -and $isDomainAdmins -and $hasGenericAll) { $domainAdminsFull = $true }
+                        "Identity=$identity; SID=$sidValue; Rights=$($ace.ActiveDirectoryRights); Type=$($ace.AccessControlType); ObjectType=$($ace.ObjectType); Enroll=$hasEnroll; FullControl=$hasGenericAll"
+                    }
+                    "AclCheck=WebEnroll:$webEnrollOk; DomainAdminsFullControl:$domainAdminsFull"
+                } catch {
+                    "ADSI_ERROR=$($_.Exception.Message)"
+                    Invoke-B2NativeText @('certutil -v -dstemplate NB-B2-WebServer')
                 }
-            } -RelevantTerms @('TemplateDN=','GG_B2_Web_Enroll','Domain Admins','Rights=','Type=Allow')
-            if ($r.Ok -and (Test-B2ContainsAll $r.Text @('GG_B2_Web_Enroll','Domain Admins','Type=Allow'))) {
-                return New-B2Result WARN 'ACL обеих групп найдены; по ObjectType/GUI подтвердите Enroll для GG_B2_Web_Enroll и Full Control для Domain Admins.'
+            } -RelevantTerms @('TemplateDN=','TargetIdentity=','GG_B2_Web_Enroll','Domain Admins','Rights=','Type=Allow','Enroll=','FullControl=','AclCheck=','ADSI_ERROR=','ExitCode=')
+            if ($r.Ok -and (Test-B2ContainsAll $r.Text @('AclCheck=WebEnroll:True','DomainAdminsFullControl:True'))) {
+                return New-B2Result PASS 'GG_B2_Web_Enroll имеет Enroll, Domain Admins имеет Full Control.'
             }
-            if (-not $r.Ok) { return New-B2Result WARN 'Не удалось прочитать ACL шаблона локальными средствами; проверьте Security tab Certificate Templates console.' }
-            return New-B2Result FAIL 'Требуемые группы не найдены в ACL шаблона.'
+            if (-not $r.Ok -or $r.Text -match 'ADSI_ERROR=') { return New-B2Result WARN 'Автоматически прочитать ACL не удалось; показан вывод certutil, проверьте Security tab Certificate Templates console.' }
+            return New-B2Result FAIL 'Не подтверждены Enroll для GG_B2_Web_Enroll и Full Control для Domain Admins.'
         }
         'E1.04' {
             $r = Invoke-B2Evidence 'Найти INF/REQ и portal certificate с private key на SHA-WEB01' {
@@ -759,13 +977,43 @@ function Test-B2AspectE {
             return New-B2Result FAIL 'Не найдены CSR-материалы или связанный private key.'
         }
         'E1.05' {
-            $r = Invoke-B2Evidence 'certutil -view issued requests for NB-B2-WebServer' {
-                Invoke-B2NativeText @('certutil -view -restrict "Disposition=20,CertificateTemplate=NB-B2-WebServer" -out "RequestID,CertificateTemplate,CommonName,RequesterName,NotAfter"')
-            } -RelevantPattern 'NB-B2-WebServer|portal|RequestID|RequesterName|NotAfter|ExitCode=' -ContextLines 1
-            if ($r.Ok -and $r.Text -match 'NB-B2-WebServer' -and $r.Text -match 'portal' -and $r.Text -match 'ExitCode=0') {
+            $r = Invoke-B2Evidence 'certutil -view -restrict "Disposition=20" -out "RequestID,CertificateTemplate,CommonName,RequesterName,NotAfter"' {
+                $configurationPath = 'HKLM:\SYSTEM\CurrentControlSet\Services\CertSvc\Configuration'
+                $caName = (Get-ItemProperty -LiteralPath $configurationPath -Name Active -ErrorAction Stop).Active
+                $raw = Invoke-B2NativeText @('certutil -view -restrict "Disposition=20" -out "RequestID,CertificateTemplate,CommonName,RequesterName,NotAfter"')
+                $lines = @($raw -split "`r?`n")
+                $matchingIndexes = @()
+                for ($i = 0; $i -lt $lines.Count; $i++) {
+                    if ($lines[$i] -match '(?i)NB-B2-WebServer') { $matchingIndexes += $i }
+                }
+
+                "IssuerCA=$caName"
+                if ($matchingIndexes.Count -gt 0) {
+                    $contextIndexes = @{}
+                    foreach ($index in $matchingIndexes) {
+                        $from = [Math]::Max(0, $index - 2)
+                        $to = [Math]::Min($lines.Count - 1, $index + 3)
+                        for ($j = $from; $j -le $to; $j++) { $contextIndexes[$j] = $true }
+                    }
+                    foreach ($index in @($contextIndexes.Keys | Sort-Object { [int]$_ })) {
+                        if (-not [string]::IsNullOrWhiteSpace($lines[[int]$index])) {
+                            "CAView: $($lines[[int]$index].Trim())"
+                        }
+                    }
+                } else {
+                    foreach ($line in @($lines | Where-Object { $_ -match '(?i)Maximum Row Index|\bRows\b|CertificateTemplate|Certificate Template' } | Select-Object -First 10)) {
+                        if (-not [string]::IsNullOrWhiteSpace($line)) { "CAView: $($line.Trim())" }
+                    }
+                    'CAView: выданные сертификаты по шаблону NB-B2-WebServer не найдены.'
+                }
+                "TemplateMatchCount=$($matchingIndexes.Count)"
+                $exitLine = @($lines | Where-Object { $_ -match '^ExitCode=' } | Select-Object -Last 1)
+                if ($exitLine.Count -gt 0) { $exitLine[0] } else { 'ExitCode=UNKNOWN' }
+            } -RelevantTerms @('IssuerCA=','CAView:','TemplateMatchCount=','ExitCode=')
+            if ($r.Ok -and (Test-B2ContainsAll $r.Text @('IssuerCA=NB-B2-ENT-CA','ExitCode=0')) -and $r.Text -match 'TemplateMatchCount=[1-9][0-9]*') {
                 return New-B2Result PASS 'В CA database найден выданный portal certificate по нужному шаблону.'
             }
-            return New-B2Result WARN 'CA database показана, но issuer/template конкретного portal certificate нужно подтвердить по строкам вывода.'
+            return New-B2Result FAIL 'На NB-B2-ENT-CA не найден выданный сертификат по шаблону NB-B2-WebServer.'
         }
         'E1.06' {
             $file = Get-B2PortalCertificateFile
@@ -792,7 +1040,7 @@ function Test-B2AspectF {
     param([string]$HostKey, [string]$AspectID)
     switch ($AspectID) {
         'F1.01' {
-            $r = Invoke-B2Evidence 'Resolve-DnsName portal/status/pki.nb-b2.local' {
+            $r = Invoke-B2Evidence 'Resolve-DnsName portal.nb-b2.local; Resolve-DnsName status.nb-b2.local; Resolve-DnsName pki.nb-b2.local' {
                 Get-B2DnsEvidence 'portal.nb-b2.local' ''
                 Get-B2DnsEvidence 'status.nb-b2.local' ''
                 Get-B2DnsEvidence 'pki.nb-b2.local' ''
@@ -806,7 +1054,7 @@ function Test-B2AspectF {
             return New-B2Result FAIL 'CNAME ca отсутствует или имеет неверную цель.'
         }
         'F1.03' {
-            $r = Invoke-B2Evidence 'Resolve-DnsName 10.22.10.11, 10.22.10.12, 10.32.20.20 -Type PTR' {
+            $r = Invoke-B2Evidence 'Resolve-DnsName 10.22.10.11 -Type PTR; Resolve-DnsName 10.22.10.12 -Type PTR; Resolve-DnsName 10.32.20.20 -Type PTR' {
                 Get-B2DnsEvidence '10.22.10.11' '' 'PTR'
                 Get-B2DnsEvidence '10.22.10.12' '' 'PTR'
                 Get-B2DnsEvidence '10.32.20.20' '' 'PTR'
@@ -823,7 +1071,7 @@ function Test-B2AspectF {
             return New-B2Result FAIL 'Зона b2.lab не найдена.'
         }
         { $_ -in @('F1.05','F1.07') } {
-            $r = Invoke-B2Evidence 'Resolve-DnsName portal.b2.lab and pki.b2.lab -Server 198.18.200.10' {
+            $r = Invoke-B2Evidence 'Resolve-DnsName portal.b2.lab -Server 198.18.200.10; Resolve-DnsName pki.b2.lab -Server 198.18.200.10' {
                 Get-B2DnsEvidence 'portal.b2.lab' '198.18.200.10'
                 Get-B2DnsEvidence 'pki.b2.lab' '198.18.200.10'
             } -RelevantTerms @('portal.b2.lab','pki.b2.lab','10.22.10.11','10.32.20.20')
@@ -831,7 +1079,7 @@ function Test-B2AspectF {
             return New-B2Result FAIL 'Simulated public DNS records отсутствуют или неверны.'
         }
         'F1.06' {
-            $r = Invoke-B2Evidence 'Resolve-DnsName portal/status/pki.nb-b2.local' {
+            $r = Invoke-B2Evidence 'Resolve-DnsName portal.nb-b2.local; Resolve-DnsName status.nb-b2.local; Resolve-DnsName pki.nb-b2.local' {
                 Get-B2DnsEvidence 'portal.nb-b2.local' ''
                 Get-B2DnsEvidence 'status.nb-b2.local' ''
                 Get-B2DnsEvidence 'pki.nb-b2.local' ''
@@ -898,12 +1146,12 @@ function Test-B2AspectG {
             return New-B2Result FAIL 'Authentication или directory browsing настроены неверно.'
         }
         'G1.06' {
-            $r = Invoke-B2Evidence 'Invoke-WebRequest https://portal.nb-b2.local' { Invoke-B2WebEvidence 'https://portal.nb-b2.local' } -RelevantTerms @('Uri=','StatusCode=','Content=','ERROR')
+            $r = Invoke-B2Evidence 'Invoke-WebRequest -Uri https://portal.nb-b2.local -UseBasicParsing -TimeoutSec 12' { Invoke-B2WebEvidence 'https://portal.nb-b2.local' } -RelevantTerms @('Uri=','StatusCode=','Content=','TcpTestSucceeded=','ERROR=')
             if ($r.Ok -and $r.Text -match 'StatusCode=200') { return New-B2Result PASS "На $HostKey портал открывается без certificate warning." }
             return New-B2Result FAIL "На $HostKey HTTPS portal не прошёл проверку доверия/доступности."
         }
         'G1.07' {
-            $r = Invoke-B2Evidence 'Invoke-WebRequest https://portal.b2.lab' { Invoke-B2WebEvidence 'https://portal.b2.lab' } -RelevantTerms @('Uri=','StatusCode=','Content=','ERROR')
+            $r = Invoke-B2Evidence 'Invoke-WebRequest -Uri https://portal.b2.lab -UseBasicParsing -TimeoutSec 12' { Invoke-B2WebEvidence 'https://portal.b2.lab' } -RelevantTerms @('Uri=','StatusCode=','Content=','TcpTestSucceeded=','ERROR=')
             if ($r.Ok -and $r.Text -match 'StatusCode=200') { return New-B2Result PASS 'Simulated public portal открывается без certificate warning.' }
             return New-B2Result FAIL 'HTTPS portal.b2.lab недоступен или не проходит TLS validation.'
         }
@@ -936,7 +1184,7 @@ function Test-B2AspectH {
             return New-B2Result FAIL 'Binding B2Status не соответствует HTTP/8080 status.nb-b2.local.'
         }
         'H1.03' {
-            $r = Invoke-B2Evidence 'Test-NetConnection status.nb-b2.local -Port 8080; Invoke-WebRequest http://status.nb-b2.local:8080' {
+            $r = Invoke-B2Evidence 'Test-NetConnection status.nb-b2.local -Port 8080; Invoke-WebRequest -Uri http://status.nb-b2.local:8080 -UseBasicParsing -TimeoutSec 12' {
                 Get-B2TcpEvidence 'status.nb-b2.local' 8080
                 Invoke-B2WebEvidence 'http://status.nb-b2.local:8080'
             } -RelevantTerms @('TcpTestSucceeded=','StatusCode=','Content=','NorthBridge B2 Status Service')
@@ -989,7 +1237,15 @@ function Test-B2AspectI {
         }
         'I1.07' {
             $r = Invoke-B2Evidence 'Get-NetFirewallRule for TCP/80 on BJ-SRV01' { Get-B2FirewallEvidence @(80) } -RelevantTerms @('LocalPort=80','RemoteAddress=','10.22.30.0/24','10.32.30.0/24','198.18.201.10','Any')
-            if ($r.Ok -and (Test-B2ContainsAll $r.Text @('10.22.30.0/24','10.32.30.0/24','198.18.201.10'))) { return New-B2Result PASS 'HTTP CDP/AIA разрешён всем требуемым клиентам.' }
+            $tcp80Rules = @($r.Text -split "`r?`n" | Where-Object {
+                $_ -match '(?i)Protocol=(TCP|6);' -and $_ -match '(?i)LocalPort=[^;]*\b80\b'
+            })
+            $allowsAny = @($tcp80Rules | Where-Object { $_ -match '(?i)RemoteAddress=[^;]*\bAny\b' }).Count -gt 0
+            $explicitCoverage = Test-B2ContainsAll ($tcp80Rules -join [Environment]::NewLine) @('10.22.30.0/24','10.32.30.0/24','198.18.201.10')
+            if ($r.Ok -and $tcp80Rules.Count -gt 0 -and ($allowsAny -or $explicitCoverage)) {
+                if ($allowsAny) { return New-B2Result PASS 'HTTP CDP/AIA разрешён всем требуемым клиентам правилом RemoteAddress=Any.' }
+                return New-B2Result PASS 'HTTP CDP/AIA разрешён всем требуемым клиентам явными RemoteAddress.'
+            }
             return New-B2Result FAIL 'Firewall BJ-SRV01:80 не включает один из требуемых источников.'
         }
         'I1.08' {
@@ -1008,7 +1264,7 @@ function Test-B2AspectJ {
     switch ($AspectID) {
         'J1.01' {
             $file = Get-B2PortalCertificateFile
-            $r = Invoke-B2Evidence 'Invoke-WebRequest https://portal.nb-b2.local; certutil -verify portal.cer' {
+            $r = Invoke-B2Evidence 'Invoke-WebRequest -Uri https://portal.nb-b2.local -UseBasicParsing -TimeoutSec 12; certutil -verify portal.cer' {
                 Invoke-B2WebEvidence 'https://portal.nb-b2.local'
                 if ([string]::IsNullOrWhiteSpace($file)) { throw 'Не найден portal.cer.' }
                 Invoke-B2NativeText @("certutil -verify `"$file`"")
@@ -1019,12 +1275,12 @@ function Test-B2AspectJ {
             return New-B2Result FAIL 'SHA-CL01 обнаружил ошибку HTTPS trust/chain/revocation.'
         }
         'J1.02' {
-            $r = Invoke-B2Evidence 'Invoke-WebRequest https://portal.nb-b2.local' { Invoke-B2WebEvidence 'https://portal.nb-b2.local' } -RelevantTerms @('Uri=','StatusCode=','Content=')
+            $r = Invoke-B2Evidence 'Invoke-WebRequest -Uri https://portal.nb-b2.local -UseBasicParsing -TimeoutSec 12' { Invoke-B2WebEvidence 'https://portal.nb-b2.local' } -RelevantTerms @('Uri=','StatusCode=','Content=','TcpTestSucceeded=','ERROR=')
             if ($r.Ok -and $r.Text -match 'StatusCode=200') { return New-B2Result PASS 'BJ-CL01 доверяет internal portal certificate.' }
             return New-B2Result FAIL 'BJ-CL01 не открывает портал без TLS warning.'
         }
         'J1.03' {
-            $r = Invoke-B2Evidence 'Проверить Root CA в LocalMachine\Root; Invoke-WebRequest https://portal.b2.lab' {
+            $r = Invoke-B2Evidence 'Проверить Root CA в LocalMachine\Root; Invoke-WebRequest -Uri https://portal.b2.lab -UseBasicParsing -TimeoutSec 12' {
                 foreach ($cert in @(Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -like '*NB-B2-ENT-CA*' })) { "TrustedRoot=$($cert.Subject); Thumbprint=$($cert.Thumbprint)" }
                 Invoke-B2WebEvidence 'https://portal.b2.lab'
             } -RelevantTerms @('TrustedRoot=','NB-B2-ENT-CA','StatusCode=','Content=')
@@ -1041,11 +1297,11 @@ function Test-B2AspectJ {
                 if ($r.Ok -and $r.Text -match 'ExitCode=0' -and $r.Text -notmatch '(?i)untrusted|revocation.*(offline|failed)|expired') { return New-B2Result PASS 'Внутренняя chain/revocation validation успешна.' }
                 return New-B2Result FAIL 'Внутренняя chain/revocation validation завершилась ошибкой.'
             }
-            $r = Invoke-B2Evidence 'Invoke-WebRequest portal.b2.lab; проверить CDP/AIA из server certificate' {
+            $r = Invoke-B2Evidence 'Invoke-WebRequest -Uri https://portal.b2.lab -UseBasicParsing -TimeoutSec 12; проверить CDP/AIA из server certificate' {
                 Invoke-B2WebEvidence 'https://portal.b2.lab'
-                $dump=Get-B2RemotePortalCertDump 'portal.b2.lab'
+                $dump=Get-B2RemotePortalCertDump -HostName 'portal.b2.lab' -DiagnosticDnsServer '198.18.200.10'
                 Test-B2PublishedCertificateUrls -Dump $dump -HostPattern 'pki\.b2\.lab'
-            } -RelevantTerms @('StatusCode=','URL=','ERROR=','PublishedUrls=')
+            } -RelevantTerms @('RemoteCertificateHost=','ExpectedUrlHostPattern=','PublishedUrlCandidate=','StatusCode=','URL=','ERROR=','PublishedUrls=')
             if ($r.Ok -and $r.Text -match 'Uri=https://portal\.b2\.lab; StatusCode=200' -and $r.Text -match 'URL=.*StatusCode=200' -and $r.Text -notmatch 'ERROR=') { return New-B2Result PASS 'Внешний trust и CDP/AIA validation подтверждены.' }
             return New-B2Result FAIL 'Внешний клиент обнаружил ошибку trust или недоступность CDP/AIA.'
         }
@@ -1069,20 +1325,24 @@ function Test-B2AspectJ {
 
 function Invoke-B2Aspect {
     param([string]$HostKey, [object]$Aspect)
-    $group = ($Aspect.AspectID -split '\.')[0]
-    switch ($group) {
-        'A1' { return Test-B2AspectA $HostKey $Aspect.AspectID }
-        'B1' { return Test-B2AspectB $Aspect.AspectID }
-        'C1' { return Test-B2AspectC $Aspect.AspectID }
-        'D1' { return Test-B2AspectD $HostKey $Aspect.AspectID }
-        'E1' { return Test-B2AspectE $Aspect.AspectID }
-        'F1' { return Test-B2AspectF $HostKey $Aspect.AspectID }
-        'G1' { return Test-B2AspectG $HostKey $Aspect.AspectID }
-        'H1' { return Test-B2AspectH $HostKey $Aspect.AspectID }
-        'I1' { return Test-B2AspectI $HostKey $Aspect.AspectID }
-        'J1' { return Test-B2AspectJ $HostKey $Aspect.AspectID }
+    $evaluatorId = $Aspect.AspectID
+    if ($Aspect.PSObject.Properties.Name -contains 'OriginalAspectID' -and -not [string]::IsNullOrWhiteSpace($Aspect.OriginalAspectID)) {
+        $evaluatorId = $Aspect.OriginalAspectID
     }
-    return New-B2Result WARN "Для $($Aspect.AspectID) нет evaluator."
+    $group = ($evaluatorId -split '\.')[0]
+    switch ($group) {
+        'A1' { return Test-B2AspectA $HostKey $evaluatorId }
+        'B1' { return Test-B2AspectB $evaluatorId }
+        'C1' { return Test-B2AspectC $evaluatorId }
+        'D1' { return Test-B2AspectD $HostKey $evaluatorId }
+        'E1' { return Test-B2AspectE $evaluatorId }
+        'F1' { return Test-B2AspectF $HostKey $evaluatorId }
+        'G1' { return Test-B2AspectG $HostKey $evaluatorId }
+        'H1' { return Test-B2AspectH $HostKey $evaluatorId }
+        'I1' { return Test-B2AspectI $HostKey $evaluatorId }
+        'J1' { return Test-B2AspectJ $HostKey $evaluatorId }
+    }
+    return New-B2Result WARN "Для $($Aspect.AspectID) нет evaluator (source ID: $evaluatorId)."
 }
 
 function Write-B2Summary {
