@@ -203,6 +203,23 @@ class Scorer:
     def skip(self, aid, why): self.results.append(Result(BY_ID[aid],"SKIP",0,details=why))
     @staticmethod
     def has_all(text,*parts): return all(re.search(p,text,re.I|re.M) for p in parts)
+    @staticmethod
+    def print_expected(aspect):
+        print(f"{CYAN}Ожидаемый результат:{NC}")
+        print(f"  {aspect.title}.")
+        print(f"  Максимальный балл: {aspect.mark:.3f}")
+    @staticmethod
+    def print_result(result):
+        color={"PASS":GREEN,"PART":PURPLE,"FAIL":RED,"SKIP":YELLOW}[result.status]
+        fraction=f" ({result.passed}/{result.total})" if result.total else ""
+        print(f"\n{CYAN}Результат аспекта:{NC}")
+        print(
+            f"{color}[{result.status}] {result.aspect.id} "
+            f"{result.score:.3f}/{result.aspect.mark:.3f}{fraction} — "
+            f"{result.aspect.title}{NC}"
+        )
+        if result.details:
+            print(f"  {result.details}")
     def ip_ok(self, dev, iface, ip):
         out=self.cmd(dev,"show ip interface brief")
         short=iface.replace("GigabitEthernet","Gi").replace("Loopback","Lo")
@@ -217,8 +234,13 @@ class Scorer:
         plan=[a for a in ASPECTS if a.number >= start]
         for index,a in enumerate(plan):
             print(f"\n{PURPLE}{'='*90}\n{a.number:03d} {a.id} — {a.title}\n{'='*90}{NC}")
+            self.print_expected(a)
+            result_count=len(self.results)
             try: self.check(a.id)
             except Exception as exc: self.results.append(Result(a,"FAIL",0,details=f"Ошибка checker: {exc}"))
+            if len(self.results) == result_count:
+                self.results.append(Result(a,"FAIL",0,details="Проверка не сформировала результат"))
+            self.print_result(self.results[-1])
             if pause and index < len(plan)-1:
                 self.pause_after_aspect(a.id)
     def check(self, aid):
