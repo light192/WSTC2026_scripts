@@ -342,6 +342,17 @@ class Scorer:
                 # such as Idle/Active/Connect mean the session is not up.
                 return fields[-1].isdigit()
         return False
+    @staticmethod
+    def bgp_prefixes_from_as(text,asn):
+        """Return NLRI whose path contains ASN, including wrapped IOS rows."""
+        prefixes=set(); current=None
+        for line in text.replace("\r", "").splitlines():
+            match=re.search(r"\b(\d+(?:\.\d+){3}/\d+)\b",line)
+            if match:
+                current=match.group(1)
+            if current and re.search(rf"(?<!\d){re.escape(str(asn))}(?!\d)",line):
+                prefixes.add(current)
+        return prefixes
     def filtered_command(self, command):
         """Add narrow IOS output filters without changing checker semantics."""
         if "|" in command:
@@ -375,7 +386,9 @@ class Scorer:
             (r"^show bgp ipv4 unicast summary$", r"Neighbor|203\.0\.113\."),
             (r"^show bgp ipv4 unicast neighbors", r"BGP neighbor|remote AS|hold time|keepalive"),
             (r"^show ip route bgp$", r"0\.0\.0\.0|10\.8[0-3]\.0\.0"),
-            (r"^show bgp ipv4 unicast$", r"Network|10\.8[0-3]\.0\.0|198\.51\.100\.(80|88)"),
+            # Keep the full BGP table for E9-E11.  Some IOS builds interpret
+            # the grouped alternation in an `include` expression differently
+            # and return only the Network header, hiding valid NLRI.
             (r"^show ip dhcp pool$", r"Pool|Leased|Total"),
             (r"^show ntp associations$", r"10\.81\.130\.10|address"),
             (r"^show ntp status$", r"Clock is|reference"),
@@ -969,8 +982,8 @@ class Scorer:
         if aid=="E12":
             # Audit every ISP route whose AS path contains the HQ AS.  Only
             # the two explicitly permitted HQ NLRI may be present.
-            leak_out=self.cmd("ISP1","show bgp ipv4 unicast | include 65220",refresh=True)
-            advertised=set(re.findall(r"(?m)^\s*[*>sdhrx ]*([0-9]+(?:\.[0-9]+){3}/\d+)\s+.*\b65220\b",leak_out))
+            leak_out=self.cmd("ISP1","show bgp ipv4 unicast",refresh=True)
+            advertised=self.bgp_prefixes_from_as(leak_out,65220)
             allowed={"10.80.0.0/16","198.51.100.80/29"}
             no_leak=bool(advertised) and advertised <= allowed and "10.80.0.0/16" in advertised
             if not self.disruptive:
