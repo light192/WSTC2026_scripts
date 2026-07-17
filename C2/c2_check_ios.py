@@ -973,17 +973,28 @@ class Scorer:
         if aid in {"E9","E10","E11"}:
             expected={"E9":["10.80.0.0/16","198.51.100.80/29"],"E10":["10.81.0.0/16","198.51.100.88/29"],"E11":["10.82.0.0/16","10.83.0.0/16"]}[aid]
             origin={"E9":"AS65220 (HQ)","E10":"AS65230 (DC)","E11":"AS65241/AS65242 (BR1/BR2)"}[aid]
-            o=self.cmd("ISP1","show bgp ipv4 unicast")
-            present=[p for p in expected if p in o]
-            missing=[p for p in expected if p not in o]
+            tests=[];present=[];missing=[]
+            for prefix in expected:
+                out=self.cmd("ISP1",f"show bgp ipv4 unicast {prefix}",refresh=True)
+                found=bool(re.search(rf"BGP routing table entry for\s+{re.escape(prefix)}(?:,|\s|$)",out,re.I))
+                tests.append(found)
+                (present if found else missing).append(prefix)
             details=(f"ISP1 от {origin}: получены [{', '.join(present) or 'нет'}]; "
                      f"НЕ получены [{', '.join(missing) or 'нет'}]")
-            return self.ratio(aid,[p in o for p in expected],details,labels=["ISP1"]*len(expected))
+            return self.ratio(aid,tests,details,labels=["ISP1"]*len(expected))
         if aid=="E12":
             # Audit every ISP route whose AS path contains the HQ AS.  Only
             # the two explicitly permitted HQ NLRI may be present.
-            leak_out=self.cmd("ISP1","show bgp ipv4 unicast",refresh=True)
-            advertised=self.bgp_prefixes_from_as(leak_out,65220)
+            convergence_timeout=120
+            advertised=set()
+            print(f"{YELLOW}[!] Ожидание исходной сходимости BGP (до {convergence_timeout} секунд)...{NC}",flush=True)
+            deadline=time.monotonic()+convergence_timeout
+            while time.monotonic()<deadline:
+                leak_out=self.cmd("ISP1","show bgp ipv4 unicast",refresh=True)
+                advertised=self.bgp_prefixes_from_as(leak_out,65220)
+                if "10.80.0.0/16" in advertised:
+                    break
+                time.sleep(5)
             allowed={"10.80.0.0/16","198.51.100.80/29"}
             no_leak=bool(advertised) and advertised <= allowed and "10.80.0.0/16" in advertised
             if not self.disruptive:
@@ -992,8 +1003,8 @@ class Scorer:
             failover_route=False; failover_ping=False; ir2_alive=False; restored=False
             try:
                 self.configure_interface_state("IR1","GigabitEthernet0/3",True)
-                print(f"{YELLOW}[!] Ожидание сходимости BGP после отключения IR1 WAN...{NC}",flush=True)
-                deadline=time.monotonic()+40
+                print(f"{YELLOW}[!] Ожидание сходимости BGP после отключения IR1 WAN (до {convergence_timeout} секунд)...{NC}",flush=True)
+                deadline=time.monotonic()+convergence_timeout
                 while time.monotonic()<deadline:
                     time.sleep(5)
                     route=self.cmd("ISP1","show bgp ipv4 unicast 10.80.0.0/16",refresh=True)
@@ -1007,8 +1018,8 @@ class Scorer:
             finally:
                 try:
                     self.configure_interface_state("IR1","GigabitEthernet0/3",False)
-                    print(f"{YELLOW}[!] Ожидание восстановления eBGP IR1...{NC}",flush=True)
-                    deadline=time.monotonic()+40
+                    print(f"{YELLOW}[!] Ожидание восстановления eBGP IR1 (до {convergence_timeout} секунд)...{NC}",flush=True)
+                    deadline=time.monotonic()+convergence_timeout
                     while time.monotonic()<deadline:
                         time.sleep(5)
                         summary=self.cmd("IR1","show bgp ipv4 unicast summary",refresh=True)
