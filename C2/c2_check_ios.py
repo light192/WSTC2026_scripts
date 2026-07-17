@@ -245,15 +245,12 @@ class Scorer:
         for s in self.sessions.values(): s.close()
         for s in self.host_sessions.values(): s.close()
     def record_command(self,dev,command,output):
-        """Record evidence and display it immediately, while the check runs."""
+        """Record evidence; device blocks are printed together with their verdict."""
         self.command_devices.append(dev)
         self.command_records.append((dev,command,output))
         if self.live_device != dev:
-            print(f"\n{BLUE}--- {dev} ---{NC}",flush=True)
+            print(f"{BLUE}[{dev}] проверка...{NC}",flush=True)
             self.live_device=dev
-        print(f"{BLUE}{dev}# {command}{NC}",flush=True)
-        print(output or "(пустой вывод)",flush=True)
-        sys.stdout.flush()
     def host_cmd(self,dev,command,timeout=15):
         session=self.host_sessions.get(dev)
         if session is None:raise RuntimeError(f"Нет host-сессии {dev}: {self.host_errors.get(dev,'node/console не найдена')}")
@@ -266,7 +263,7 @@ class Scorer:
         gw=re.search(r"GATEWAY\s*:\s*([0-9.]+)",out,re.I)
         dns=re.search(r"DNS\s*:\s*([0-9.]+)",out,re.I)
         return out,(ip_match.group(1) if ip_match else ""),(int(ip_match.group(2)) if ip_match else 0),(gw.group(1) if gw else ""),(dns.group(1) if dns else "")
-    def vpcs_dhcp_lease(self,dev,timeout=30):
+    def vpcs_dhcp_lease(self,dev,timeout=60):
         self.host_cmd(dev,"ip dhcp",timeout=timeout)
         deadline=time.monotonic()+timeout;last=("","",0,"","")
         while time.monotonic()<deadline:
@@ -333,6 +330,17 @@ class Scorer:
         for block in blocks:
             if re.search(rf"Advertising Router:\s*{re.escape(router_id)}\b",block,re.I) and re.search(rf"Metric:\s*{metric}\b",block,re.I):
                 return True
+        return False
+    @staticmethod
+    def bgp_peer_established(text,peer,remote_as=65000):
+        """Recognize an established peer without depending on IOS spacing/CRLF."""
+        clean=re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text).replace("\r", "")
+        for line in clean.splitlines():
+            fields=line.split()
+            if len(fields)>=3 and fields[0]==peer and fields[2]==str(remote_as):
+                # In IOS summary a numeric final field is State/PfxRcd; words
+                # such as Idle/Active/Connect mean the session is not up.
+                return fields[-1].isdigit()
         return False
     def filtered_command(self, command):
         """Add narrow IOS output filters without changing checker semantics."""
@@ -414,7 +422,10 @@ class Scorer:
         for dev,_,_ in self.command_records:
             if dev not in order: order.append(dev)
         for dev,value in zip(labels,values): grouped[dev].append(bool(value))
-        print(f"\n{CYAN}Результаты по устройствам:{NC}",flush=True)
+        records=defaultdict(list)
+        for dev,command,output in self.command_records:
+            records[dev].append((command,output))
+        print(f"\n{CYAN}Информация и результаты по устройствам:{NC}",flush=True)
         for dev in order:
             device_values=grouped.get(dev,[])
             if device_values:
@@ -424,8 +435,12 @@ class Scorer:
                 passed=sum(values); total=len(values)
                 status="PASS" if passed==total else "PART" if passed else "FAIL"
             color={"PASS":GREEN,"PART":PURPLE,"FAIL":RED}[status]
-            # Flush the device verdict before the next device block starts.
-            print(f"  {color}{dev}: {status} ({passed}/{total}){NC}",flush=True)
+            print(f"\n{BLUE}--- {dev} ---{NC}",flush=True)
+            for command,output in records[dev]:
+                print(f"{BLUE}{dev}# {command}{NC}",flush=True)
+                print(output or "(пустой вывод)",flush=True)
+            # Keep the verdict adjacent to this device's evidence.
+            print(f"{color}>>> {dev}: {status} ({passed}/{total}){NC}",flush=True)
             sys.stdout.flush()
     def ratio(self, aid, tests, details="", labels=None):
         a=BY_ID[aid]; vals=[bool(x) for x in tests]; p=sum(vals); t=len(vals)
@@ -597,7 +612,7 @@ class Scorer:
                 trunk_output=self.cmd(d,"show interfaces trunk")
                 ports=[]
                 for line in trunk_output.splitlines():
-                    match=re.match(r"^\s*(\S+)\s+.*\btrunking\b",line,re.I)
+                    match=re.match(r"^\s*\S*?((?:GigabitEthernet|Gi)\d+(?:/\d+)+|(?:Port-channel|Po)\d+)\s+.*\btrunking\b",line,re.I)
                     if match and match.group(1) not in ports:
                         ports.append(match.group(1))
                 for port in ports:
@@ -682,7 +697,7 @@ class Scorer:
             pc_data={}; renew_errors=[]
             for pc in ["PC1","PC2","PC3","PC4"]:
                 try:
-                    pc_data[pc]=self.vpcs_dhcp_lease(pc,30)[1]
+                    pc_data[pc]=self.vpcs_dhcp_lease(pc,60)[1]
                     # Give DHCP Snooping a moment to install the binding after ACK.
                     time.sleep(2)
                 except Exception as exc:
@@ -922,7 +937,7 @@ class Scorer:
         # BGP
         peers={"E1":("IR1","203.0.113.1"),"E2":("IR2","203.0.113.5"),"E3":("IR3","203.0.113.9"),"E4":("BR1","203.0.113.13"),"E5":("BR2","203.0.113.17")}
         if aid in peers:
-            d,p=peers[aid]; o=self.cmd(d,"show bgp ipv4 unicast summary"); return self.ratio(aid,[bool(re.search(rf"^{re.escape(p)}\s+\S+\s+65000\s+.*\s\d+\s*$",o,re.M))])
+            d,p=peers[aid]; o=self.cmd(d,"show bgp ipv4 unicast summary"); return self.ratio(aid,[self.bgp_peer_established(o,p)])
         if aid=="E6": return self.ratio(aid,[self.has_all(self.cmd(d,f"show bgp ipv4 unicast neighbors {p}"),r"hold time is 30",r"keepalive interval is 10") for d,p in peers.values()])
         if aid=="E7":
             expected=["0.0.0.0/0","10.82.0.0/16","10.83.0.0/16"]
@@ -971,7 +986,7 @@ class Scorer:
                     route=self.cmd("ISP1","show bgp ipv4 unicast 10.80.0.0/16",refresh=True)
                     summary=self.cmd("IR2","show bgp ipv4 unicast summary",refresh=True)
                     failover_route="203.0.113.6" in route and "65220" in route
-                    ir2_alive=bool(re.search(r"(?m)^203\.0\.113\.5\s+\S+\s+65000\s+.*\s\d+\s*$",summary))
+                    ir2_alive=self.bgp_peer_established(summary,"203.0.113.5")
                     if failover_route and ir2_alive: break
                 ping=self.cmd("ISP1","ping 10.80.0.13 repeat 3 timeout 1",refresh=True)
                 success=re.search(r"Success rate is (\d+) percent",ping,re.I)
@@ -984,7 +999,7 @@ class Scorer:
                     while time.monotonic()<deadline:
                         time.sleep(5)
                         summary=self.cmd("IR1","show bgp ipv4 unicast summary",refresh=True)
-                        if re.search(r"(?m)^203\.0\.113\.1\s+\S+\s+65000\s+.*\s\d+\s*$",summary):
+                        if self.bgp_peer_established(summary,"203.0.113.1"):
                             restored=True; break
                 except Exception as exc:
                     print(f"{RED}[!] Не удалось подтвердить восстановление IR1 WAN: {exc}{NC}",flush=True)
@@ -1019,7 +1034,7 @@ class Scorer:
             network={"PC1":"10.80.10.","PC2":"10.80.40.","PC3":"10.82.10.","PC4":"10.83.10."}[dev]
             gateway={"PC1":"10.80.10.1","PC2":"10.80.40.1","PC3":"10.82.10.1","PC4":"10.83.10.1"}[dev]
             try:
-                _,ip,prefix,gw,dns=self.vpcs_dhcp_lease(dev,30)
+                _,ip,prefix,gw,dns=self.vpcs_dhcp_lease(dev,60)
                 last=int(ip.rsplit(".",1)[1]) if ip.startswith(network) else -1
                 ok=100<=last<=199 and prefix==24 and gw==gateway and dns=="10.81.130.10"
                 return self.ratio(aid,[ok],f"IP={ip}/{prefix}, gateway={gw}, DNS={dns}",labels=[dev])
@@ -1077,7 +1092,7 @@ class Scorer:
             tests=[];labels=[]
             try:
                 for pc,router in [("PC3","BR1"),("PC4","BR2")]:
-                    pc_ip=self.vpcs_dhcp_lease(pc,30)[1]
+                    pc_ip=self.vpcs_dhcp_lease(pc,60)[1]
                     self.privileged_exec(router,"clear ip nat translation *")
                     self.vpcs_ping(pc,"198.51.100.100",5)
                     nat=self.cmd(router,r"show ip nat translations | include 10\.82\.10\.|10\.83\.10\.|203\.0\.113\.(14|18)",refresh=True)
@@ -1100,9 +1115,9 @@ class Scorer:
             private_tests=[]; private_details=[]
             failover_ok=False; restored=True
             try:
-                pc1_ip=self.vpcs_dhcp_lease("PC1",30)[1]
-                pc3_ip=self.vpcs_dhcp_lease("PC3",30)[1]
-                pc4_ip=self.vpcs_dhcp_lease("PC4",30)[1]
+                pc1_ip=self.vpcs_dhcp_lease("PC1",60)[1]
+                pc3_ip=self.vpcs_dhcp_lease("PC3",60)[1]
+                pc4_ip=self.vpcs_dhcp_lease("PC4",60)[1]
                 self.privileged_exec("IR1","clear ip nat translation *")
                 self.privileged_exec("IR2","clear ip nat translation *")
                 for name,target in [("PC3",pc3_ip),("PC4",pc4_ip),("OPS-SRV","10.81.130.10")]:
@@ -1197,7 +1212,7 @@ class Scorer:
             # Four independent DHCP acceptance rows.
             for pc,(network,gateway) in dhcp_expected.items():
                 try:
-                    _,ip,prefix,gw,dns=self.vpcs_dhcp_lease(pc,30)
+                    _,ip,prefix,gw,dns=self.vpcs_dhcp_lease(pc,60)
                     leases[pc]=ip
                     last=int(ip.rsplit(".",1)[1]) if ip.startswith(network) else -1
                     ok=100<=last<=199 and prefix==24 and gw==gateway and dns=="10.81.130.10"

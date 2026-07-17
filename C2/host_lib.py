@@ -10,7 +10,7 @@ class VPCSSession:
     def connect(self):
         self.sock=socket.create_connection((self.host,self.port),self.timeout)
         self.sock.settimeout(.3);self.sock.sendall(b"\r\n");self._read(2)
-    def _read(self,max_wait):
+    def _read(self,max_wait,wait_pattern=None):
         if not self.sock:return ""
         chunks=[];end=time.monotonic()+max_wait;last=time.monotonic()
         while time.monotonic()<end:
@@ -19,14 +19,17 @@ class VPCSSession:
                 if not data:break
                 chunks.append(data);last=time.monotonic()
                 text=b"".join(chunks).decode(errors="replace")
-                if re.search(r"(?m)(?:VPCS|PC\d+)[^\r\n]*>\s*$",text):break
+                if wait_pattern and re.search(wait_pattern,text,re.I|re.M):break
+                if not wait_pattern and re.search(r"(?m)(?:VPCS|PC\d+)[^\r\n]*>\s*$",text):break
             except socket.timeout:
-                if chunks and time.monotonic()-last>.4:break
+                if not wait_pattern and chunks and time.monotonic()-last>.4:break
         return b"".join(chunks).decode(errors="replace").replace("\r","")
     def exec(self,command,timeout=None):
         if not self.sock:self.connect()
         self._read(.3);self.sock.sendall((command+"\r\n").encode())
-        raw=self._read(timeout or self.timeout)
+        wait_pattern=(r"\bDORA\b|(?:VPCS|PC\d+)[^\r\n]*>\s*$"
+                      if re.fullmatch(r"\s*ip\s+dhcp\s*",command,re.I) else None)
+        raw=self._read(timeout or self.timeout,wait_pattern=wait_pattern)
         lines=[]
         for line in raw.splitlines():
             s=line.strip()
