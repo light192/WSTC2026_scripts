@@ -26,6 +26,20 @@ EOF
 manual_commands_for() {
   local id="$1" automatic="$2"
   case "$id" in
+    A3.1.7)
+      printf '%s\n' \
+        "ssh root@10.33.10.1 'sysctl net.ipv4.ip_forward'" \
+        "ssh root@10.33.10.1 '/usr/lib/systemd/systemd-sysctl --cat-config | grep -nE \"(^# /.*\\.conf|^[[:space:]]*net\\.ipv4\\.ip_forward[[:space:]]*=)\"'" \
+        "ssh root@10.33.20.1 'sysctl net.ipv4.ip_forward'" \
+        "ssh root@10.33.20.1 '/usr/lib/systemd/systemd-sysctl --cat-config | grep -nE \"(^# /.*\\.conf|^[[:space:]]*net\\.ipv4\\.ip_forward[[:space:]]*=)\"'"
+      ;;
+    A3.1.8)
+      printf '%s\n' \
+        "ssh root@10.33.10.1 'sysctl net.ipv6.conf.all.forwarding'" \
+        "ssh root@10.33.10.1 '/usr/lib/systemd/systemd-sysctl --cat-config | grep -nE \"(^# /.*\\.conf|^[[:space:]]*net\\.ipv6\\.conf\\.all\\.forwarding[[:space:]]*=)\"'" \
+        "ssh root@10.33.20.1 'sysctl net.ipv6.conf.all.forwarding'" \
+        "ssh root@10.33.20.1 '/usr/lib/systemd/systemd-sysctl --cat-config | grep -nE \"(^# /.*\\.conf|^[[:space:]]*net\\.ipv6\\.conf\\.all\\.forwarding[[:space:]]*=)\"'"
+      ;;
     A3.1.1)
       printf '%s\n' \
         "ssh root@10.33.10.1 'hostnamectl --static'" \
