@@ -56,7 +56,8 @@ ssh_precheck() {
     ip="${HOST_IP[$name]:-}"
     printf '%-18s %-15s ' "$name" "$ip"
     out="$(timeout "$A3_TIMEOUT" ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
-      -o UserKnownHostsFile=/dev/null -o ConnectTimeout="$A3_TIMEOUT" root@"$ip" 'hostname -s' 2>&1)"
+      -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+      -o ConnectTimeout="$A3_TIMEOUT" root@"$ip" 'hostname -s' 2>&1)"
     if grep -Fqx "$name" <<<"$out"; then echo -e "${GREEN}OK${NC}"
     else echo -e "${YELLOW}NO KEY ACCESS${NC}: $out"; fi
   done
@@ -92,7 +93,35 @@ run_command() {
     echo 'set -o pipefail'
     # Every local SSH launched by a How-to-Mark command is non-interactive and
     # bounded. This prevents one unavailable host from freezing a criterion.
-    printf '%s\n' "ssh() { command timeout ${A3_TIMEOUT}s /usr/bin/ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=${A3_TIMEOUT} -o ConnectionAttempts=1 -o ServerAliveInterval=2 -o ServerAliveCountMax=2 -o GSSAPIAuthentication=no \"\$@\"; }"
+    cat <<EOF
+ssh() {
+  local arg target=unknown device rc
+  # The last user@host argument is the actual SSH destination (not ProxyJump).
+  for arg in "\$@"; do
+    case "\$arg" in *@*) target="\${arg##*@}" ;; esac
+  done
+  target="\${target#[}"
+  target="\${target%]}"
+  case "\$target" in
+    10.33.10.1|branch-fw-a3|branch-fw-a3.nova.a3.test) device=branch-fw-a3 ;;
+    10.33.10.20|branch-user-a3|branch-user-a3.nova.a3.test) device=branch-user-a3 ;;
+    10.33.20.1|hq-fw-a3|hq-fw-a3.nova.a3.test) device=hq-fw-a3 ;;
+    10.33.20.20|admin-a3|admin-a3.nova.a3.test) device=admin-a3 ;;
+    10.33.40.10|proxy-a3|proxy-a3.nova.a3.test) device=proxy-a3 ;;
+    10.33.40.20|app-a3|app-a3.nova.a3.test) device=app-a3 ;;
+    10.33.30.10|log-a3|log-a3.nova.a3.test) device=log-a3 ;;
+    *) device="\$target" ;;
+  esac
+  command timeout ${A3_TIMEOUT}s /usr/bin/ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=${A3_TIMEOUT} -o ConnectionAttempts=1 -o ServerAliveInterval=2 -o ServerAliveCountMax=2 -o GSSAPIAuthentication=no "\$@"
+  rc=\$?
+  if [ "\$rc" -eq 0 ]; then
+    printf 'DEVICE %-18s (%s): PASS\n' "\$device" "\$target"
+  else
+    printf 'DEVICE %-18s (%s): FAIL [exit=%s]\n' "\$device" "\$target" "\$rc"
+  fi
+  return "\$rc"
+}
+EOF
     printf '%s\n' "$command"
   } > "$tmp"
   chmod 700 "$tmp"
