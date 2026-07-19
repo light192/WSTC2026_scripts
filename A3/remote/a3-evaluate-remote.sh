@@ -230,14 +230,14 @@ device_counts() {
       line=$0
       gsub(/\033\[[0-9;]*m/, "", line)
       sub(/^.*DEVICE[[:space:]]+/, "", line)
-      split(line, f, /[[:space:]]+/)
-      dev=f[1]
+      split(line, fields, /[[:space:]]+/)
+      dev=fields[1]
       if (line ~ /:[[:space:]]+FAIL([[:space:]]|$)/) state[dev]="FAIL"
       else if (line ~ /:[[:space:]]+PASS([[:space:]]|$)/ && state[dev]!="FAIL") state[dev]="PASS"
     }
     END {
-      for (d in state) if (state[d]=="PASS") p++; else if (state[d]=="FAIL") f++
-      printf "%d %d\n", p+0, f+0
+      for (d in state) if (state[d]=="PASS") pass_count++; else if (state[d]=="FAIL") fail_count++
+      printf "%d %d\n", pass_count+0, fail_count+0
     }' <<<"$1"
 }
 
@@ -245,7 +245,7 @@ failed_device_list() {
   awk '
     /DEVICE[[:space:]]/ {
       line=$0; gsub(/\033\[[0-9;]*m/, "", line)
-      sub(/^.*DEVICE[[:space:]]+/, "", line); split(line, f, /[[:space:]]+/); dev=f[1]
+      sub(/^.*DEVICE[[:space:]]+/, "", line); split(line, fields, /[[:space:]]+/); dev=fields[1]
       if (line ~ /:[[:space:]]+FAIL([[:space:]]|$)/) state[dev]="FAIL"
       else if (line ~ /:[[:space:]]+PASS([[:space:]]|$)/ && state[dev]!="FAIL") state[dev]="PASS"
     }
