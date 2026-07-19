@@ -84,17 +84,38 @@ EOF
 }
 
 run_command() {
-  local command="$1" tmp
+  local command="$1" tmp out_file pipe_status
   tmp="$(mktemp)"
-  { echo '#!/usr/bin/env bash'; echo 'set -o pipefail'; printf '%s\n' "$command"; } > "$tmp"
+  out_file="$(mktemp)"
+  {
+    echo '#!/usr/bin/env bash'
+    echo 'set -o pipefail'
+    # Every local SSH launched by a How-to-Mark command is non-interactive and
+    # bounded. This prevents one unavailable host from freezing a criterion.
+    printf '%s\n' "ssh() { command timeout ${A3_TIMEOUT}s /usr/bin/ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=${A3_TIMEOUT} -o ConnectionAttempts=1 -o ServerAliveInterval=2 -o ServerAliveCountMax=2 -o GSSAPIAuthentication=no \"\$@\"; }"
+    printf '%s\n' "$command"
+  } > "$tmp"
   chmod 700 "$tmp"
+  echo -e "${BLUE}Текущий вывод:${NC}"
   if command -v timeout >/dev/null 2>&1; then
-    A3_LAST_OUT="$(timeout "$A3_CMD_TIMEOUT" bash "$tmp" </dev/null 2>&1)"; A3_LAST_RC=$?
+    timeout "$A3_CMD_TIMEOUT" bash "$tmp" </dev/null 2>&1 \
+      | tee -a "$A3_DETAIL_LOG" "$out_file" \
+      | grep --line-buffered -Ei "$A3_EVIDENCE_RE"
+    pipe_status=("${PIPESTATUS[@]}")
+    A3_LAST_RC="${pipe_status[0]}"
   else
-    A3_LAST_OUT="$(bash "$tmp" </dev/null 2>&1)"; A3_LAST_RC=$?
+    bash "$tmp" </dev/null 2>&1 \
+      | tee -a "$A3_DETAIL_LOG" "$out_file" \
+      | grep --line-buffered -Ei "$A3_EVIDENCE_RE"
+    pipe_status=("${PIPESTATUS[@]}")
+    A3_LAST_RC="${pipe_status[0]}"
   fi
-  rm -f "$tmp"
+  A3_LAST_OUT="$(cat "$out_file")"
+  if [ ! -s "$out_file" ]; then echo "(пустой вывод)"; fi
+  rm -f "$tmp" "$out_file"
 }
+
+A3_EVIDENCE_RE='active|enabled|listening|LISTEN|UNCONN|10\.33\.|192\.0\.2\.|2001:db8:a3|10\.233\.3|fd00:a3:wg|nova\.a3\.test|branch-|hq-|admin-|proxy-|app-|log-|default|forward|SOA|NS|CNAME|PTR|REFUSED|status:|NOERROR|NXDOMAIN|SERVFAIL|subject=|issuer=|CA:TRUE|Certificate Sign|CRL Sign|Server Authentication|DNS:|Verify return code|ssl_verify_result|HTTP/|Location:|A3_|OK|PASS|FAIL|peer:|interface: wg0|latest handshake|allowed ips|transfer:|policy drop|reject|succeeded|refused|timed out|No route|Permission denied|/var/log/remote|root:|syslog:|nginx|8080|514|51820|Command:|Result:|none|packet loss|bytes from|ExitCode'
 
 filter_output() {
   local out="$1" lines filtered
@@ -256,8 +277,8 @@ main() {
     fi
     step "$id" "$desc"; cmd_show "$command"
     run_command "$command"
-    display="$(filter_output "$A3_LAST_OUT")"
-    show_output "$display"$'\n'"ExitCode=$A3_LAST_RC"
+    # Raw output is already streamed to screen and detail.log by run_command.
+    show_output "ExitCode=$A3_LAST_RC (вывод показан выше по мере выполнения)"
     if evaluate_result "$id" "$A3_LAST_OUT" "$A3_LAST_RC"; then
       pass "$id" "$mark" "фактический вывод соответствует ожидаемому результату"
     else
