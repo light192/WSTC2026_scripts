@@ -21,6 +21,77 @@ Usage: sudo bash remote/a3-evaluate-remote.sh [options]
 EOF
 }
 
+# Human-readable commands are deliberately separated from the automatic
+# assertion wrappers.  These lines can be copied to a shell one by one.
+manual_commands_for() {
+  local id="$1" automatic="$2"
+  case "$id" in
+    A3.1.1)
+      printf '%s\n' \
+        "ssh root@10.33.10.1 'hostnamectl --static'" \
+        "ssh root@10.33.10.20 'hostnamectl --static'" \
+        "ssh root@10.33.20.1 'hostnamectl --static'" \
+        "ssh root@10.33.20.20 'hostnamectl --static'" \
+        "ssh root@10.33.40.10 'hostnamectl --static'" \
+        "ssh root@10.33.40.20 'hostnamectl --static'" \
+        "ssh root@10.33.30.10 'hostnamectl --static'"
+      ;;
+    A3.2.3)
+      printf '%s\n' \
+        "ssh root@10.33.20.20 'dig @10.33.40.10 +short branch-fw-a3.nova.a3.test A'" \
+        "ssh root@10.33.20.20 'dig @10.33.40.10 +short branch-user-a3.nova.a3.test A'" \
+        "ssh root@10.33.20.20 'dig @10.33.40.10 +short hq-fw-a3.nova.a3.test A'" \
+        "ssh root@10.33.20.20 'dig @10.33.40.10 +short admin-a3.nova.a3.test A'" \
+        "ssh root@10.33.20.20 'dig @10.33.40.10 +short proxy-a3.nova.a3.test A'" \
+        "ssh root@10.33.20.20 'dig @10.33.40.10 +short app-a3.nova.a3.test A'" \
+        "ssh root@10.33.20.20 'dig @10.33.40.10 +short log-a3.nova.a3.test A'"
+      ;;
+    A3.5.8)
+      printf '%s\n' "ssh root@10.33.10.20 'ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 root@10.233.3.1 hostname'"
+      ;;
+    A3.5.10)
+      printf '%s\n' \
+        "ssh root@10.33.10.20 'ssh -J root@10.233.3.1 -o BatchMode=yes -o ConnectTimeout=8 root@app-a3.nova.a3.test hostname'" \
+        "ssh root@10.33.10.20 'ssh -J root@10.233.3.1 -o BatchMode=yes -o ConnectTimeout=8 root@log-a3.nova.a3.test hostname'"
+      ;;
+    A3.6.9)
+      printf '%s\n' \
+        "ssh root@10.33.20.20 'ssh -o BatchMode=yes -o ConnectTimeout=5 root@10.33.10.1 hostname'" \
+        "ssh root@10.33.20.20 'ssh -o BatchMode=yes -o ConnectTimeout=5 root@10.33.10.20 hostname'" \
+        "ssh root@10.33.20.20 'ssh -o BatchMode=yes -o ConnectTimeout=5 root@10.33.20.1 hostname'" \
+        "ssh root@10.33.20.20 'ssh -o BatchMode=yes -o ConnectTimeout=5 root@10.33.40.10 hostname'" \
+        "ssh root@10.33.20.20 'ssh -o BatchMode=yes -o ConnectTimeout=5 root@10.33.40.20 hostname'" \
+        "ssh root@10.33.20.20 'ssh -o BatchMode=yes -o ConnectTimeout=5 root@10.33.30.10 hostname'"
+      ;;
+    A3.8.1)
+      printf '%s\n' \
+        "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 root@10.33.10.1 hostname" \
+        "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 root@10.33.10.20 hostname" \
+        "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 root@10.33.20.1 hostname" \
+        "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 root@10.33.40.10 hostname" \
+        "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 root@10.33.40.20 hostname" \
+        "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 root@10.33.30.10 hostname"
+      ;;
+    A3.8.3)
+      printf '%s\n' \
+        "test -f /opt/a3-checks/a3-selfcheck.sh && echo FILE_EXISTS || echo FILE_NOT_FOUND" \
+        "test -x /opt/a3-checks/a3-selfcheck.sh && echo EXECUTABLE || echo NOT_EXECUTABLE" \
+        "ls -l /opt/a3-checks/a3-selfcheck.sh" \
+        "head -40 /opt/a3-checks/a3-selfcheck.sh"
+      ;;
+    A3.8.11)
+      printf '%s\n' \
+        "dig +short portal.nova.a3.test A" \
+        "curl -fsS --max-time 8 https://portal.nova.a3.test/" \
+        "ssh root@10.33.10.1 'nft list ruleset | grep table'" \
+        "ssh root@10.33.20.1 'nft list ruleset | grep table'" \
+        "ssh root@10.33.10.20 'ping -c2 -W2 10.233.3.1; wg show wg0'" \
+        "ssh root@10.33.30.10 'test -s /var/log/remote/proxy-a3.log && echo LOG_PRESENT || echo LOG_MISSING'"
+      ;;
+    *) printf '%s\n' "$automatic" ;;
+  esac
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-pause) A3_PAUSE=0 ;;
@@ -76,9 +147,15 @@ EOF
     A3.5.13) echo "ssh root@10.33.20.1 'systemctl restart wg-quick@wg0'; ssh root@10.33.10.20 'systemctl restart wg-quick@wg0; ping -c2 10.233.3.1; wg show'" ;;
     A3.7.9) echo "ssh root@10.33.30.10 'systemctl restart rsyslog'; ssh root@10.33.40.20 'logger -t a3_app A3_LOG_RESTART_TEST'; sleep 2; ssh root@10.33.30.10 'grep -R A3_LOG_RESTART_TEST /var/log/remote 2>/dev/null'" ;;
     A3.8.11) cat <<'EOF'
-ssh root@10.33.20.20 'dig +short portal.nova.a3.test; curl -fsS https://portal.nova.a3.test/; nft list ruleset >/dev/null'
-ssh root@10.33.10.20 'ping -c2 10.233.3.1; wg show'
-ssh root@10.33.30.10 'test -s /var/log/remote/proxy-a3.log'
+check_component() { name="$1"; shift; out=$("$@" 2>&1); code=$?; printf '%s\n' "$out"; if [ "$code" -eq 0 ]; then echo "PERSISTENCE_OK $name"; printf '\033[32mDEVICE %-18s: PASS\033[0m\n' "$name"; else echo "PERSISTENCE_FAIL $name exit=$code"; printf '\033[31mDEVICE %-18s: FAIL\033[0m\n' "$name"; return 1; fi; }
+rc=0
+check_component dns bash -c 'got=$(dig +short portal.nova.a3.test A); echo "DNS actual=$got expected=10.33.40.10"; [ "$got" = 10.33.40.10 ]' || rc=1
+check_component portal bash -c 'got=$(curl -fsS --max-time 8 https://portal.nova.a3.test/ | tr -d "\r\n"); echo "Portal body actual=$got expected=A3_PORTAL_OK"; [ "$got" = A3_PORTAL_OK ]' || rc=1
+check_component branch-firewall command ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=8 root@10.33.10.1 'nft list ruleset | grep table | head -20' || rc=1
+check_component hq-firewall command ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=8 root@10.33.20.1 'nft list ruleset | grep table | head -20' || rc=1
+check_component wireguard command ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=8 root@10.33.10.20 'ping -c2 -W2 10.233.3.1 && wg show wg0' || rc=1
+check_component central-log command ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=8 root@10.33.30.10 'ls -lh /var/log/remote/proxy-a3.log && test -s /var/log/remote/proxy-a3.log' || rc=1
+exit "$rc"
 EOF
       ;;
   esac
@@ -150,15 +227,7 @@ ssh() {
     A3.1.4:log-a3) expected='10.33.30.1' ;;
     A3.3.9:branch-user-a3|A3.3.9:admin-a3) expected='A3_PORTAL_OK' ;;
   esac
-  if [ "\$semantic_rc" -eq 0 ] && [ "\$A3_CURRENT_ID" = A3.1.7 ]; then
-    expected='runtime net.ipv4.ip_forward=1 и persistent setting = 1'
-    count="\$(grep -Ec 'net\.ipv4\.ip_forward[[:space:]]*=[[:space:]]*1' "\$ssh_out" || true)"
-    [ "\$count" -ge 2 ] || semantic_rc=1
-  elif [ "\$semantic_rc" -eq 0 ] && [ "\$A3_CURRENT_ID" = A3.1.8 ]; then
-    expected='runtime net.ipv6.conf.all.forwarding=1 и persistent setting = 1'
-    count="\$(grep -Ec 'net\.ipv6\.conf\.all\.forwarding[[:space:]]*=[[:space:]]*1' "\$ssh_out" || true)"
-    [ "\$count" -ge 2 ] || semantic_rc=1
-  elif [ "\$semantic_rc" -eq 0 ] && [ -n "\$expected" ]; then
+  if [ "\$semantic_rc" -eq 0 ] && [ -n "\$expected" ]; then
     for item in \$expected; do
       grep -Fq "\$item" "\$ssh_out" || semantic_rc=1
     done
@@ -193,17 +262,15 @@ EOF
     printf '%s\n' "$command"
   } > "$tmp"
   chmod 700 "$tmp"
-  echo -e "${BLUE}Текущий вывод:${NC}"
+  echo -e "${BLUE}Полный фактический вывод (stdout/stderr):${NC}"
   if command -v timeout >/dev/null 2>&1; then
     timeout "$A3_CMD_TIMEOUT" bash "$tmp" </dev/null 2>&1 \
-      | tee -a "$A3_DETAIL_LOG" "$out_file" \
-      | grep --line-buffered -Ei "$A3_EVIDENCE_RE"
+      | tee -a "$A3_DETAIL_LOG" "$out_file"
     pipe_status=("${PIPESTATUS[@]}")
     A3_LAST_RC="${pipe_status[0]}"
   else
     bash "$tmp" </dev/null 2>&1 \
-      | tee -a "$A3_DETAIL_LOG" "$out_file" \
-      | grep --line-buffered -Ei "$A3_EVIDENCE_RE"
+      | tee -a "$A3_DETAIL_LOG" "$out_file"
     pipe_status=("${PIPESTATUS[@]}")
     A3_LAST_RC="${pipe_status[0]}"
   fi
@@ -212,7 +279,7 @@ EOF
   rm -f "$tmp" "$out_file"
 }
 
-A3_EVIDENCE_RE='active|enabled|listening|LISTEN|UNCONN|10\.33\.|192\.0\.2\.|2001:db8:a3|10\.233\.3|fd00:a3:|ALLOWED_IPS_|SSH_WG_|SSH_JUMP_|WG_SSH_PORT_|ADMIN_SSH_|BACKEND_TCP_|BACKEND_HEALTH_|ACCESS_EVENT_|LOG_EVIDENCE_|DNS_ALLOWED_|HTTP_ALLOWED_|HTTPS_ALLOWED_|nova\.a3\.test|branch-|hq-|admin-|proxy-|app-|log-|default|forward|SOA|NS|CNAME|PTR|REFUSED|status:|flags:|DNS_RECURSION|ROOT_CA_|PRIVATE_KEY|PORTAL_CERT_VERIFY|PORTAL_CONTENT_|TLS_VERIFY_|HEALTHZ_|APP_PROXY_|HTTP_STATUS=|CERTIFICATE=|NOERROR|NXDOMAIN|SERVFAIL|subject=|issuer=|CA:TRUE|Certificate Sign|CRL Sign|Server Authentication|DNS:|Verify return code|ssl_verify_result|HTTP/|Location:|A3_|OK|PASS|FAIL|peer:|interface: wg0|latest handshake|allowed ips|transfer:|policy drop|reject|succeeded|refused|timed out|No route|Permission denied|/var/log/remote|root:|syslog:|nginx|8080|514|51820|Command:|Result:|none|packet loss|bytes from|ExitCode'
+A3_EVIDENCE_RE='active|enabled|listening|LISTEN|UNCONN|10\.33\.|192\.0\.2\.|2001:db8:a3|10\.233\.3|fd00:a3:|IPV4_FORWARD_|IPV6_FORWARD_|DNS_SOA_|DNS_NS_|ALLOWED_IPS_|SSH_WG_|SSH_JUMP_|WG_SSH_PORT_|ADMIN_SSH_|BACKEND_TCP_|BACKEND_HEALTH_|ACCESS_EVENT_|LOG_EVIDENCE_|DNS_ALLOWED_|HTTP_ALLOWED_|HTTPS_ALLOWED_|nova\.a3\.test|branch-|hq-|admin-|proxy-|app-|log-|default|forward|SOA|NS|CNAME|PTR|REFUSED|status:|flags:|DNS_RECURSION|ROOT_CA_|PRIVATE_KEY|PORTAL_CERT_VERIFY|PORTAL_CONTENT_|TLS_VERIFY_|HEALTHZ_|APP_PROXY_|HTTP_STATUS=|CERTIFICATE=|NOERROR|NXDOMAIN|SERVFAIL|subject=|issuer=|CA:TRUE|Certificate Sign|CRL Sign|Server Authentication|DNS:|Verify return code|ssl_verify_result|HTTP/|Location:|A3_|OK|PASS|FAIL|peer:|interface: wg0|latest handshake|allowed ips|transfer:|policy drop|reject|succeeded|refused|timed out|No route|Permission denied|/var/log/remote|root:|syslog:|nginx|8080|514|51820|Command:|Result:|none|packet loss|bytes from|ExitCode'
 
 filter_output() {
   local out="$1" lines filtered
@@ -277,16 +344,16 @@ evaluate_result() {
     A3.1.4) contains_all "$o" 10.33.10.1 10.33.20.1 10.33.30.1 10.33.40.1 ;;
     A3.1.5) contains_all "$o" 10.33.20.0/24 10.33.30.0/24 10.33.40.0/24 192.0.2.20 10.33.10.0/24 192.0.2.10 ;;
     A3.1.6) contains_all "$o" 2001:db8:a3:20::/64 2001:db8:a3:30::/64 2001:db8:a3:40::/64 2001:db8:a3:100::20 2001:db8:a3:10::/64 2001:db8:a3:100::10 ;;
-    A3.1.7) [ "$(count_regex "$o" 'net\.ipv4\.ip_forward *= *1')" -ge 4 ] ;;
-    A3.1.8) [ "$(count_regex "$o" 'net\.ipv6\.conf\.all\.forwarding *= *1')" -ge 4 ] ;;
+    A3.1.7) contains_all "$o" "IPV4_FORWARD_OK branch-fw-a3" "IPV4_FORWARD_OK hq-fw-a3" && ! grep -Fq IPV4_FORWARD_FAIL <<<"$o" ;;
+    A3.1.8) contains_all "$o" "IPV6_FORWARD_OK branch-fw-a3" "IPV6_FORWARD_OK hq-fw-a3" && ! grep -Fq IPV6_FORWARD_FAIL <<<"$o" ;;
     A3.1.9|A3.1.10) [ "$rc" -eq 0 ] && [ "$(count_regex "$o" '0% packet loss')" -ge 2 ] ;;
     A3.1.11) grep -Eq '10\.33\.10\.20\.[0-9]+|10\.33\.10\.20 >' <<<"$o" && ! grep -Eq '192\.0\.2\.20\.[0-9]+|10\.33\.40\.1\.[0-9]+' <<<"$o" ;;
     A3.1.12) [ "$rc" -eq 0 ] && contains_all "$o" 10.33.10.1 10.33.20.1 net.ipv4.ip_forward net.ipv6.conf.all.forwarding ;;
     A3.1.13) ! regex_any "$o" 'https?://(deb\.|archive\.|security\.|ftp\.)|deb\.debian\.org|ubuntu\.com' ;;
 
     A3.2.1) regex_all "$o" 'active' '(:53|53/)' ;;
-    A3.2.2) regex_all "$o" 'SOA' 'NS' && ! regex_any "$o" 'SERVFAIL|NXDOMAIN' ;;
-    A3.2.3) contains_all "$o" 10.33.10.1 10.33.10.20 10.33.20.1 10.33.20.20 10.33.30.10 10.33.40.10 10.33.40.20 ;;
+    A3.2.2) contains_all "$o" DNS_SOA_OK DNS_NS_OK && ! regex_any "$o" 'DNS_SOA_FAIL|DNS_NS_FAIL|SERVFAIL|NXDOMAIN' ;;
+    A3.2.3) contains_all "$o" "DNS_A_OK branch-fw-a3" "DNS_A_OK branch-user-a3" "DNS_A_OK hq-fw-a3" "DNS_A_OK admin-a3" "DNS_A_OK proxy-a3" "DNS_A_OK app-a3" "DNS_A_OK log-a3" && ! grep -Fq 'DNS_A_FAIL' <<<"$o" ;;
     A3.2.4) contains_all "$o" 2001:db8:a3:10::1 2001:db8:a3:10::20 2001:db8:a3:20::1 2001:db8:a3:20::20 2001:db8:a3:30::10 2001:db8:a3:40::10 2001:db8:a3:40::20 ;;
     A3.2.5) contains_all "$o" 192.0.2.10 192.0.2.20 10.33.20.1 10.33.30.1 10.33.40.1 ;;
     A3.2.6) contains_all "$o" 10.233.3.1 10.233.3.10 ;;
@@ -305,7 +372,7 @@ evaluate_result() {
     A3.3.3) grep -Fq PRIVATE_KEY_SECURITY_OK <<<"$o" && grep -Fq PRIVATE_KEY_WEB_NOT_EXPOSED <<<"$o" && ! grep -Fq PRIVATE_KEY_SECURITY_FAIL <<<"$o" ;;
     A3.3.4) grep -Fq PORTAL_CERT_VERIFY_OK <<<"$o" && ! grep -Fq PORTAL_CERT_VERIFY_FAIL <<<"$o" ;;
     A3.3.5) contains_all "$o" DNS:proxy-a3.nova.a3.test DNS:portal.nova.a3.test DNS:www.nova.a3.test ;;
-    A3.3.6) regex_any "$o" 'TLS Web Server Authentication|serverAuth' && ! grep -Fq 'CA:TRUE' <<<"$o" ;;
+    A3.3.6) contains_all "$o" PORTAL_CERT_FOUND PORTAL_EKU_OK PORTAL_BASIC_CONSTRAINTS_OK && ! regex_any "$o" 'PORTAL_CERT_NOT_FOUND|PORTAL_EKU_FAIL|PORTAL_BASIC_CONSTRAINTS_FAIL' ;;
     A3.3.7) contains_all "$o" "TLS_VERIFY_OK branch-user-a3" "TLS_VERIFY_OK admin-a3" && ! grep -Fq TLS_VERIFY_FAIL <<<"$o" ;;
     A3.3.8) [ "$rc" -eq 0 ] && [ "$(count_regex "$o" 'Nova A3 Root CA|nova.*\.crt|ca-certificates')" -ge 2 ] ;;
     A3.3.9) [ "$rc" -eq 0 ] && [ "$(count_regex "$o" '^A3_PORTAL_OK$')" -ge 2 ] ;;
@@ -329,8 +396,8 @@ evaluate_result() {
     A3.4.15) regex_all "$o" 'issuer=.*Nova A3 Root CA' 'subject=' ;;
 
     A3.5.1) [ "$(count_regex "$o" 'interface: wg0|active|enabled')" -ge 2 ] && [ "$(count_regex "$o" 'peer:')" -ge 2 ] ;;
-    A3.5.2) contains_all "$o" 10.233.3.1 fd00:a3:wg::1 ;;
-    A3.5.3) contains_all "$o" 10.233.3.10 fd00:a3:wg::10 ;;
+    A3.5.2) contains_all "$o" 10.233.3.1 fd00:a3:a3::1 ;;
+    A3.5.3) contains_all "$o" 10.233.3.10 fd00:a3:a3::10 ;;
     A3.5.4) regex_any "$o" '51820' && ! regex_any "$o" 'Connection refused|No route' ;;
     A3.5.5) regex_all "$o" 'peer:' 'latest handshake:' 'transfer:' && ! regex_any "$o" 'latest handshake: *(never|$)' ;;
     A3.5.6) grep -Fq ALLOWED_IPS_OK <<<"$o" && ! grep -Fq ALLOWED_IPS_FAIL <<<"$o" ;;
@@ -366,16 +433,16 @@ evaluate_result() {
     A3.7.9) grep -Fq A3_LOG_RESTART_TEST <<<"$o" ;;
     A3.7.10) contains_all "$o" LOG_EVIDENCE_CONTENT_OK LOG_EVIDENCE_RESULT_OK LOG_EVIDENCE_OK && ! regex_any "$o" 'LOG_EVIDENCE_CONTENT_FAIL|LOG_EVIDENCE_RESULT_FAIL|LOG_EVIDENCE_FAIL:' ;;
 
-    A3.8.1) contains_all "$o" branch-fw-a3 branch-user-a3 hq-fw-a3 proxy-a3 app-a3 log-a3 ;;
+    A3.8.1) contains_all "$o" "ADMIN_KEY_OK branch-fw-a3" "ADMIN_KEY_OK branch-user-a3" "ADMIN_KEY_OK hq-fw-a3" "ADMIN_KEY_OK proxy-a3" "ADMIN_KEY_OK app-a3" "ADMIN_KEY_OK log-a3" && ! grep -Fq ADMIN_KEY_FAIL <<<"$o" ;;
     A3.8.2) regex_any "$o" '/opt/grading/a3' ;;
-    A3.8.3) regex_any "$o" 'a3-selfcheck|#!/' ;;
+    A3.8.3) [ "$rc" -eq 0 ] && contains_all "$o" SELFCHECK_FOUND SELFCHECK_EXECUTABLE_OK && ! regex_any "$o" 'SELFCHECK_NOT_FOUND|SELFCHECK_NOT_EXECUTABLE|DEVICE .*FAIL' ;;
     A3.8.4) regex_all "$o" 'route|routing' 'dig|dns' 'openssl|certificate' 'portal|curl' 'wg|WireGuard' 'nft|firewall' 'rsyslog|log-a3' ;;
     A3.8.5) regex_all "$o" 'Command:|команд' 'PASS|FAIL|Result' ;;
     A3.8.6) regex_all "$o" 'allow|positive' 'deny|negative' 'PASS|FAIL' ;;
     A3.8.7) regex_all "$o" 'interface:|hq-fw-a3' 'peer:|branch-user-a3' ;;
     A3.8.8) regex_all "$o" 'openssl|ssl_verify_result|verify return' 'SAN|subjectAltName|portal' ;;
     A3.8.9) [ -n "$(tr -d '[:space:]' <<<"$o")" ;;
-    A3.8.11) [ "$rc" -eq 0 ] && contains_all "$o" A3_PORTAL_OK '0% packet loss' ;;
+    A3.8.11) [ "$rc" -eq 0 ] && contains_all "$o" "PERSISTENCE_OK dns" "PERSISTENCE_OK portal" "PERSISTENCE_OK branch-firewall" "PERSISTENCE_OK hq-firewall" "PERSISTENCE_OK wireguard" "PERSISTENCE_OK central-log" && ! grep -Fq PERSISTENCE_FAIL <<<"$o" ;;
     *) [ "$rc" -eq 0 ] && [ -n "$o" ] && ! regex_any "$o" 'Permission denied|command not found|No such file|syntax error' ;;
   esac
 }
@@ -416,7 +483,7 @@ main() {
     else
       command="$(decode_newlines "$commands")"
     fi
-    step "$id" "$desc"; cmd_show "$command"
+    step "$id" "$desc"; cmd_show "$id" "$command"
     run_command "$command" "$id"
     # Raw output is already streamed to screen and detail.log by run_command.
     show_output "ExitCode=$A3_LAST_RC (вывод показан выше по мере выполнения)"
@@ -429,6 +496,9 @@ main() {
       failed_names="$(failed_device_list "$A3_LAST_OUT")"
       show_output "По устройствам: PASS=$passed, FAIL=$failed; не прошли: ${failed_names:-не определено}; начислено $awarded из $mark"
       part "$id" "$mark" "$awarded" "$passed/$total устройств прошли; не прошли: ${failed_names:-не определено}. Ожидалось: $expected"
+    elif [ "$failed" -gt 0 ]; then
+      failed_names="$(failed_device_list "$A3_LAST_OUT")"
+      fail "$id" "$mark" "явный DEVICE FAIL на: ${failed_names:-не определено}. Ожидалось: $expected"
     elif evaluate_result "$id" "$A3_LAST_OUT" "$A3_LAST_RC"; then
       pass "$id" "$mark" "фактический вывод соответствует ожидаемому результату"
     else

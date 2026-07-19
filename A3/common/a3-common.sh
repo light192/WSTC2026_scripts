@@ -51,10 +51,10 @@ print_criterion_context() {
   A3_LAST_CONTEXT_ID="$id"
   awk -F'\t' -v id="$id" -v blue="$BLUE" -v nc="$NC" '
     NR>1 && $1==id {
-      cmd=$6; gsub(/\\n/, "\n", cmd)
       print blue "Критерий: " $1 " — " $3 nc
       print blue "Рекомендуемая точка запуска:" nc; print $5
-      print blue "Команды проверки:" nc; print cmd
+      print blue "Команды для ручной проверки:" nc
+      print "Готовые команды без служебной логики evaluator показаны ниже."
       print blue "Ожидаемый результат:" nc; print $7
       if ($8!="") { print blue "Примечания:" nc; print $8 }
       exit
@@ -62,7 +62,22 @@ print_criterion_context() {
 }
 
 step() { local id="$1"; shift; echo -e "${YELLOW}Шаг: $id $*${NC}"; print_criterion_context "$id"; }
-cmd_show() { echo -e "${BLUE}Выполняется:${NC}"; printf '%s\n' "$*"; }
+cmd_show() {
+  local id automatic display
+  if [ "$#" -eq 1 ]; then
+    id=""; automatic="$1"
+  else
+    id="$1"; automatic="$2"
+  fi
+  if declare -F manual_commands_for >/dev/null 2>&1; then
+    display="$(manual_commands_for "$id" "$automatic")"
+  else
+    display="$automatic"
+  fi
+  echo -e "${BLUE}Готовые команды для копирования и ручной проверки:${NC}"
+  printf '%s\n' "$display"
+  echo -e "${BLUE}Автоматическая проверка запускается evaluator без вывода служебной обвязки.${NC}"
+}
 show_output() { [ -z "$A3_PENDING_OUTPUT" ] || A3_PENDING_OUTPUT+=$'\n'; A3_PENDING_OUTPUT+="${1:-(пустой вывод)}"; }
 flush_output() {
   [ -n "$A3_PENDING_OUTPUT" ] || return 0
