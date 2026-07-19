@@ -1,0 +1,33 @@
+# Карта портов C2
+
+## HQ routed links
+
+| Link | Side A | Side B |
+|---|---|---|
+| IR1–CR1 | IR1 G0/0 | CR1 G0/0 |
+| IR1–CR2 | IR1 G0/1 | CR2 G0/3 |
+| IR2–CR1 | IR2 G0/1 | CR1 G0/3 |
+| IR2–CR2 | IR2 G0/0 | CR2 G0/0 |
+| IR1–IR2 | IR1 G0/2 | IR2 G0/2 |
+| CR1–CR2 | CR1 G0/2 | CR2 G0/2 |
+| CR1–DS1 | CR1 G0/1 | DS1 G0/0 |
+| CR1–DS2 | CR1 G0/4 | DS2 G0/3 |
+| CR2–DS1 | CR2 G0/4 | DS1 G0/3 |
+| CR2–DS2 | CR2 G0/1 | DS2 G0/0 |
+| IR2–IR3 | IR2 G0/4 | IR3 G0/2 |
+
+## WAN
+
+IR1 G0/3–ISP1 G0/0; IR2 G0/3–ISP1 G0/1; IR3 G0/3–ISP1 G0/2;
+BR1 G0/0–ISP1 G0/3; BR2 G0/0–ISP1 G0/4.
+
+## Switch links
+
+- DS1 G0/1–AS1 G0/0; DS1 G0/2–AS2 G0/1.
+- DS2 G0/1–AS2 G0/0; DS2 G0/2–AS1 G0/1.
+- DS1–DS2 Port-channel12: G1/0 and G1/1 on both sides.
+- AS1 G0/2–PC1; AS2 G0/2–PC2.
+- IR3 G0/0–DS3 G0/0; IR3 G0/1–DS4 G0/0.
+- DS3 G0/1–DS4 G0/1; DS3 G0/2–SVR1; DS4 G0/2–SVR2.
+- BR1 G0/1–AS3 G0/0; AS3 G0/1–PC3.
+- BR2 G0/1–AS4 G0/0; AS4 G0/1–PC4.

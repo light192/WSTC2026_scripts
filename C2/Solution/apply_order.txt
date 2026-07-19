@@ -1,0 +1,10 @@
+1. IR1, IR2, CR1, CR2
+2. DS1, DS2
+3. AS1, AS2
+4. IR3, DS3, DS4
+5. BR1, AS3
+6. BR2, AS4
+7. На PC1-PC4 выполнить: ip dhcp
+8. Сгенерировать ping/DNS/NAT/NetFlow traffic по hosts/PC1-PC4.txt
+9. Сохранить конфигурации: copy running-config startup-config
+10. Выполнить VALIDATION.md и c2_check_ios.py

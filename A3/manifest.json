@@ -1,0 +1,15 @@
+{
+  "name": "A3_Evaluation_Scripts_Shanghai_Shenzhen",
+  "module": "A3",
+  "structure_source": "A2_Evaluation_Scripts_Shanghai_Shenzhen",
+  "marking_scheme_source": "Module A/A3_Marking_Scheme_Shanghai_Shenzhen_Detailed_HowToMark_v2_RU.xlsx",
+  "task_source": "Module A/A3_Competitor_Task_EN_styled.pdf",
+  "recommended_remote_launch_host": "admin-a3",
+  "recommended_remote_launch_ip": "10.33.20.20",
+  "domain": "nova.a3.test",
+  "remote_script": "remote/a3-evaluate-remote.sh",
+  "local_script": "local/a3-local-check.sh",
+  "criteria_map": "criteria/a3_criteria_map.tsv",
+  "criteria_count": 106,
+  "total_marks": 25.0
+}
