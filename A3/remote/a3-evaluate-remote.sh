@@ -50,6 +50,11 @@ manual_commands_for() {
         "ssh root@10.33.40.20 'hostnamectl --static'" \
         "ssh root@10.33.30.10 'hostnamectl --static'"
       ;;
+    A3.2.2)
+      printf '%s\n' \
+        "dig @10.33.40.10 nova.a3.test SOA +time=3 +tries=1 +noall +comments +answer" \
+        "dig @10.33.40.10 nova.a3.test NS +time=3 +tries=1 +noall +comments +answer"
+      ;;
     A3.2.3)
       printf '%s\n' \
         "ssh root@10.33.20.20 'dig @10.33.40.10 +short branch-fw-a3.nova.a3.test A'" \
@@ -60,13 +65,33 @@ manual_commands_for() {
         "ssh root@10.33.20.20 'dig @10.33.40.10 +short app-a3.nova.a3.test A'" \
         "ssh root@10.33.20.20 'dig @10.33.40.10 +short log-a3.nova.a3.test A'"
       ;;
+    A3.2.4)
+      printf '%s\n' \
+        "dig @10.33.40.10 +short branch-fw-a3.nova.a3.test AAAA" \
+        "dig @10.33.40.10 +short branch-user-a3.nova.a3.test AAAA" \
+        "dig @10.33.40.10 +short hq-fw-a3.nova.a3.test AAAA" \
+        "dig @10.33.40.10 +short admin-a3.nova.a3.test AAAA" \
+        "dig @10.33.40.10 +short proxy-a3.nova.a3.test AAAA" \
+        "dig @10.33.40.10 +short app-a3.nova.a3.test AAAA" \
+        "dig @10.33.40.10 +short log-a3.nova.a3.test AAAA"
+      ;;
     A3.5.8)
       printf '%s\n' "ssh root@10.33.10.20 'ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 root@10.233.3.1 hostname'"
+      ;;
+    A3.5.1)
+      printf '%s\n' \
+        "ssh root@10.33.20.1 'wg show; systemctl list-units --all \"wg-quick@*\"; systemctl list-unit-files \"wg-quick@*\"; ls -l /etc/wireguard/*.conf 2>/dev/null'" \
+        "ssh root@10.33.10.20 'wg show; systemctl list-units --all \"wg-quick@*\"; systemctl list-unit-files \"wg-quick@*\"; ls -l /etc/wireguard/*.conf 2>/dev/null'"
       ;;
     A3.5.10)
       printf '%s\n' \
         "ssh root@10.33.10.20 'ssh -J root@10.233.3.1 -o BatchMode=yes -o ConnectTimeout=8 root@app-a3.nova.a3.test hostname'" \
         "ssh root@10.33.10.20 'ssh -J root@10.233.3.1 -o BatchMode=yes -o ConnectTimeout=8 root@log-a3.nova.a3.test hostname'"
+      ;;
+    A3.5.13)
+      printf '%s\n' \
+        "ssh root@10.33.20.1 'wg show interfaces; ls -l /etc/wireguard/*.conf; systemctl restart wg-quick@wg; systemctl --no-pager --full status wg-quick@wg; wg show wg'" \
+        "ssh root@10.33.10.20 'wg show interfaces; ls -l /etc/wireguard/*.conf; systemctl restart wg-quick@wg1; sleep 3; systemctl --no-pager --full status wg-quick@wg1; wg show wg1; ping -c3 -W2 10.233.3.1'"
       ;;
     A3.6.9)
       printf '%s\n' \
@@ -76,6 +101,11 @@ manual_commands_for() {
         "ssh root@10.33.20.20 'ssh -o BatchMode=yes -o ConnectTimeout=5 root@10.33.40.10 hostname'" \
         "ssh root@10.33.20.20 'ssh -o BatchMode=yes -o ConnectTimeout=5 root@10.33.40.20 hostname'" \
         "ssh root@10.33.20.20 'ssh -o BatchMode=yes -o ConnectTimeout=5 root@10.33.30.10 hostname'"
+      ;;
+    A3.6.10)
+      printf '%s\n' \
+        "ssh root@10.33.40.10 'nc -vz -w3 app-a3.nova.a3.test 8080'" \
+        "ssh root@10.33.40.10 'curl -sS --max-time 5 -i http://app-a3.nova.a3.test:8080/healthz'"
       ;;
     A3.8.1)
       printf '%s\n' \
@@ -158,7 +188,11 @@ EOF
     A3.2.14) echo "ssh root@10.33.40.10 'systemctl restart bind9 2>/dev/null || systemctl restart named; dig @127.0.0.1 nova.a3.test SOA +short'" ;;
     A3.3.12) echo "ssh root@10.33.40.10 'systemctl restart nginx'; ssh root@10.33.10.20 'curl -fsS https://portal.nova.a3.test/'" ;;
     A3.4.14) echo "ssh root@10.33.40.20 'systemctl restart a3-app 2>/dev/null || systemctl restart a3-app.service'; ssh root@10.33.40.10 'systemctl restart nginx'; ssh root@10.33.20.20 'curl -fsS https://portal.nova.a3.test/app; curl -fsS https://portal.nova.a3.test/healthz'" ;;
-    A3.5.13) echo "ssh root@10.33.20.1 'systemctl restart wg-quick@wg0'; ssh root@10.33.10.20 'systemctl restart wg-quick@wg0; ping -c2 10.233.3.1; wg show'" ;;
+    A3.5.13) cat <<'EOF'
+ssh root@10.33.20.1 'iface=$(wg show interfaces 2>/dev/null | awk "{print \$1}"); echo "WG_RESTART_INTERFACE=$iface"; [ -n "$iface" ] || { echo "WG_RESTART_FAIL hq-fw-a3 no-interface"; exit 1; }; [ -f "/etc/wireguard/$iface.conf" ] || { echo "WG_RESTART_FAIL hq-fw-a3 missing=/etc/wireguard/$iface.conf"; exit 1; }; systemctl restart "wg-quick@$iface" || { systemctl status "wg-quick@$iface" --no-pager -l; echo "WG_RESTART_FAIL hq-fw-a3 unit=wg-quick@$iface"; exit 1; }; wg show "$iface"; wg show "$iface" peers | grep -q . || { echo "WG_RESTART_FAIL hq-fw-a3 no-peer"; exit 1; }; echo "WG_RESTART_OK hq-fw-a3 interface=$iface"'
+ssh root@10.33.10.20 'iface=$(wg show interfaces 2>/dev/null | awk "{print \$1}"); echo "WG_RESTART_INTERFACE=$iface"; [ -n "$iface" ] || { echo "WG_RESTART_FAIL branch-user-a3 no-interface"; exit 1; }; [ -f "/etc/wireguard/$iface.conf" ] || { echo "WG_RESTART_FAIL branch-user-a3 missing=/etc/wireguard/$iface.conf"; exit 1; }; systemctl restart "wg-quick@$iface" || { systemctl status "wg-quick@$iface" --no-pager -l; echo "WG_RESTART_FAIL branch-user-a3 unit=wg-quick@$iface"; exit 1; }; sleep 3; wg show "$iface"; ping -c3 -W2 10.233.3.1 || { echo "WG_RESTART_FAIL branch-user-a3 ping"; exit 1; }; echo "WG_RESTART_OK branch-user-a3 interface=$iface"'
+EOF
+      ;;
     A3.7.9) echo "ssh root@10.33.30.10 'systemctl restart rsyslog'; ssh root@10.33.40.20 'logger -t a3_app A3_LOG_RESTART_TEST'; sleep 2; ssh root@10.33.30.10 'grep -R A3_LOG_RESTART_TEST /var/log/remote 2>/dev/null'" ;;
     A3.8.11) cat <<'EOF'
 check_component() { name="$1"; shift; out=$("$@" 2>&1); code=$?; printf '%s\n' "$out"; if [ "$code" -eq 0 ]; then echo "PERSISTENCE_OK $name"; printf '\033[32mDEVICE %-18s: PASS\033[0m\n' "$name"; else echo "PERSISTENCE_FAIL $name exit=$code"; printf '\033[31mDEVICE %-18s: FAIL\033[0m\n' "$name"; return 1; fi; }
@@ -368,7 +402,7 @@ evaluate_result() {
     A3.2.1) regex_all "$o" 'active' '(:53|53/)' ;;
     A3.2.2) contains_all "$o" DNS_SOA_OK DNS_NS_OK && ! regex_any "$o" 'DNS_SOA_FAIL|DNS_NS_FAIL|SERVFAIL|NXDOMAIN' ;;
     A3.2.3) contains_all "$o" "DNS_A_OK branch-fw-a3" "DNS_A_OK branch-user-a3" "DNS_A_OK hq-fw-a3" "DNS_A_OK admin-a3" "DNS_A_OK proxy-a3" "DNS_A_OK app-a3" "DNS_A_OK log-a3" && ! grep -Fq 'DNS_A_FAIL' <<<"$o" ;;
-    A3.2.4) contains_all "$o" 2001:db8:a3:10::1 2001:db8:a3:10::20 2001:db8:a3:20::1 2001:db8:a3:20::20 2001:db8:a3:30::10 2001:db8:a3:40::10 2001:db8:a3:40::20 ;;
+    A3.2.4) contains_all "$o" "DNS_AAAA_OK branch-fw-a3" "DNS_AAAA_OK branch-user-a3" "DNS_AAAA_OK hq-fw-a3" "DNS_AAAA_OK admin-a3" "DNS_AAAA_OK proxy-a3" "DNS_AAAA_OK app-a3" "DNS_AAAA_OK log-a3" && ! grep -Fq DNS_AAAA_FAIL <<<"$o" ;;
     A3.2.5) contains_all "$o" 192.0.2.10 192.0.2.20 10.33.20.1 10.33.30.1 10.33.40.1 ;;
     A3.2.6) contains_all "$o" 10.233.3.1 10.233.3.10 ;;
     A3.2.7) [ "$(count_regex "$o" 'proxy-a3\.nova\.a3\.test')" -ge 2 ] ;;
@@ -409,7 +443,7 @@ evaluate_result() {
     A3.4.14) [ "$rc" -eq 0 ] && contains_all "$o" A3_APP_INTERNAL_OK OK ;;
     A3.4.15) regex_all "$o" 'issuer=.*Nova A3 Root CA' 'subject=' ;;
 
-    A3.5.1) [ "$(count_regex "$o" 'interface: wg0|active|enabled')" -ge 2 ] && [ "$(count_regex "$o" 'peer:')" -ge 2 ] ;;
+    A3.5.1) contains_all "$o" "WG_SERVICE_OK hq-fw-a3" "WG_SERVICE_OK branch-user-a3" && ! grep -Fq WG_SERVICE_FAIL <<<"$o" ;;
     A3.5.2) contains_all "$o" 10.233.3.1 fd00:a3:a3::1 ;;
     A3.5.3) contains_all "$o" 10.233.3.10 fd00:a3:a3::10 ;;
     A3.5.4) regex_any "$o" '51820' && ! regex_any "$o" 'Connection refused|No route' ;;
@@ -421,7 +455,7 @@ evaluate_result() {
     A3.5.10) contains_all "$o" "SSH_JUMP_OK app-a3" "SSH_JUMP_OK log-a3" && ! grep -Fq SSH_JUMP_FAIL <<<"$o" ;;
     A3.5.11|A3.6.6|A3.6.12|A3.6.13) no_successful_connect "$o" ;;
     A3.5.12) [ "$rc" -eq 0 ] && grep -Fq '0% packet loss' <<<"$o" ;;
-    A3.5.13) [ "$rc" -eq 0 ] && regex_all "$o" '0% packet loss' 'peer:' ;;
+    A3.5.13) [ "$rc" -eq 0 ] && contains_all "$o" "WG_RESTART_OK hq-fw-a3" "WG_RESTART_OK branch-user-a3" '0% packet loss' && ! grep -Fq WG_RESTART_FAIL <<<"$o" ;;
     A3.5.14) ! grep -Ei 'masquerade|snat' <<<"$o" | grep -Eiq 'wg0|10\.233\.3|fd00:a3:wg' ;;
 
     A3.6.1|A3.6.2) regex_all "$o" 'active' 'table|chain|hook' ;;
