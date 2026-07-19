@@ -66,7 +66,7 @@ cmd_show() { echo -e "${BLUE}Выполняется:${NC}"; printf '%s\n' "$*"; 
 show_output() { [ -z "$A3_PENDING_OUTPUT" ] || A3_PENDING_OUTPUT+=$'\n'; A3_PENDING_OUTPUT+="${1:-(пустой вывод)}"; }
 flush_output() {
   [ -n "$A3_PENDING_OUTPUT" ] || return 0
-  echo -e "${BLUE}Фактический вывод:${NC}" | tee -a "$A3_DETAIL_LOG"
+  echo -e "${BLUE}Завершение команды:${NC}" | tee -a "$A3_DETAIL_LOG"
   printf '%s\n' "$A3_PENDING_OUTPUT" | tee -a "$A3_DETAIL_LOG"
   A3_PENDING_OUTPUT=""
 }
@@ -78,6 +78,11 @@ record_result() {
   case "$status" in
     PASS) echo -e "${GREEN}PASS [$id/$mark] — $msg${NC}" ;;
     FAIL) echo -e "${RED}FAIL [$id/$mark] — $msg${NC}" ;;
+    PART)
+      local awarded="${msg#awarded=}"
+      awarded="${awarded%%;*}"
+      echo -e "${PURPLE}PART [$id $awarded/$mark] — ${msg#*;}${NC}"
+      ;;
     WARN) echo -e "${YELLOW}WARN [$id/$mark] — $msg${NC}" ;;
     SKIP) echo -e "${CYAN}SKIP [$id/$mark] — $msg${NC}" ;;
   esac
@@ -86,6 +91,7 @@ record_result() {
 
 pass() { record_result "$1" "$2" PASS "$3"; }
 fail() { record_result "$1" "$2" FAIL "$3"; }
+part() { record_result "$1" "$2" PART "awarded=$3;$4"; }
 warn() { record_result "$1" "$2" WARN "$3"; }
 skip() { record_result "$1" "$2" SKIP "$3"; }
 contains_all() { local h="$1" n; shift; for n in "$@"; do grep -Fq "$n" <<<"$h" || return 1; done; }
@@ -96,10 +102,15 @@ count_regex() { grep -Eic "$2" <<<"$1" || true; }
 
 write_summary() {
   local summary="$A3_REPORT_DIR/a3-summary.txt"
-  awk -F'\t' 'NR>1 { total+=$2; count[$3]++; if($3=="PASS") score+=$2; else missed[$3]+=$2 }
+  awk -F'\t' 'NR>1 {
+      total+=$2; count[$3]++;
+      if($3=="PASS") score+=$2;
+      else if($3=="PART") { msg=$4; sub(/^awarded=/,"",msg); sub(/;.*/,"",msg); score+=msg+0; missed[$3]+=$2-(msg+0) }
+      else missed[$3]+=$2
+    }
     END { printf "Сводка проверки A3\n===================\n";
       printf "Засчитано: %.2f / %.2f\n",score,total;
-      printf "PASS: %d, FAIL: %d, WARN: %d, SKIP: %d\n",count["PASS"],count["FAIL"],count["WARN"],count["SKIP"];
-      printf "Не засчитано: %.2f; предупреждения: %.2f; пропущено: %.2f\n",missed["FAIL"],missed["WARN"],missed["SKIP"] }' \
+      printf "PASS: %d, PART: %d, FAIL: %d, WARN: %d, SKIP: %d\n",count["PASS"],count["PART"],count["FAIL"],count["WARN"],count["SKIP"];
+      printf "Не засчитано: %.2f; частично потеряно: %.2f; предупреждения: %.2f; пропущено: %.2f\n",missed["FAIL"],missed["PART"],missed["WARN"],missed["SKIP"] }' \
     "$A3_RESULTS_TSV" | tee "$summary"
 }

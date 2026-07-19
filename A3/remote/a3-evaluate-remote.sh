@@ -85,20 +85,31 @@ EOF
 }
 
 run_command() {
-  local command="$1" tmp out_file pipe_status
+  local command="$1" criterion_id="$2" tmp out_file pipe_status
   tmp="$(mktemp)"
   out_file="$(mktemp)"
   {
     echo '#!/usr/bin/env bash'
     echo 'set -o pipefail'
+    printf 'A3_CURRENT_ID=%q\n' "$criterion_id"
+    case "$criterion_id" in
+      A3.7.*) echo 'A3_SSH_TIMEOUT=15' ;;
+      *) printf 'A3_SSH_TIMEOUT=%q\n' "$A3_TIMEOUT" ;;
+    esac
     # Every local SSH launched by a How-to-Mark command is non-interactive and
     # bounded. This prevents one unavailable host from freezing a criterion.
     cat <<EOF
 ssh() {
-  local arg target=unknown device rc
+  local arg target=unknown device rc semantic_rc expected item ssh_out count
   # The last user@host argument is the actual SSH destination (not ProxyJump).
   for arg in "\$@"; do
-    case "\$arg" in *@*) target="\${arg##*@}" ;; esac
+    case "\$arg" in
+      *@*)
+        # A quoted remote command may itself contain user@host plus spaces.
+        # Only a standalone SSH destination argument is accepted here.
+        case "\$arg" in *[[:space:]]*) ;; *) target="\${arg##*@}" ;; esac
+        ;;
+    esac
   done
   target="\${target#[}"
   target="\${target%]}"
@@ -112,13 +123,70 @@ ssh() {
     10.33.30.10|log-a3|log-a3.nova.a3.test) device=log-a3 ;;
     *) device="\$target" ;;
   esac
-  command timeout ${A3_TIMEOUT}s /usr/bin/ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=${A3_TIMEOUT} -o ConnectionAttempts=1 -o ServerAliveInterval=2 -o ServerAliveCountMax=2 -o GSSAPIAuthentication=no "\$@"
-  rc=\$?
-  if [ "\$rc" -eq 0 ]; then
-    printf 'DEVICE %-18s (%s): PASS\n' "\$device" "\$target"
-  else
-    printf 'DEVICE %-18s (%s): FAIL [exit=%s]\n' "\$device" "\$target" "\$rc"
+  ssh_out="\$(mktemp)"
+  command timeout "\${A3_SSH_TIMEOUT}s" /usr/bin/ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=${A3_TIMEOUT} -o ConnectionAttempts=1 -o ServerAliveInterval=2 -o ServerAliveCountMax=2 -o GSSAPIAuthentication=no "\$@" 2>&1 | tee "\$ssh_out"
+  rc=\${PIPESTATUS[0]}
+  semantic_rc=\$rc
+  expected=''
+  case "\$A3_CURRENT_ID:\$device" in
+    A3.1.1:*) expected="\$device" ;;
+    A3.1.2:branch-fw-a3) expected='10.33.10.1/24 192.0.2.10/24' ;;
+    A3.1.2:branch-user-a3) expected='10.33.10.20/24' ;;
+    A3.1.2:hq-fw-a3) expected='192.0.2.20/24 10.33.20.1/24 10.33.30.1/24 10.33.40.1/24' ;;
+    A3.1.2:admin-a3) expected='10.33.20.20/24' ;;
+    A3.1.2:proxy-a3) expected='10.33.40.10/24' ;;
+    A3.1.2:app-a3) expected='10.33.40.20/24' ;;
+    A3.1.2:log-a3) expected='10.33.30.10/24' ;;
+    A3.1.3:branch-fw-a3) expected='2001:db8:a3:10::1/64 2001:db8:a3:100::10/64' ;;
+    A3.1.3:branch-user-a3) expected='2001:db8:a3:10::20/64' ;;
+    A3.1.3:hq-fw-a3) expected='2001:db8:a3:100::20/64 2001:db8:a3:20::1/64 2001:db8:a3:30::1/64 2001:db8:a3:40::1/64' ;;
+    A3.1.3:admin-a3) expected='2001:db8:a3:20::20/64' ;;
+    A3.1.3:proxy-a3) expected='2001:db8:a3:40::10/64' ;;
+    A3.1.3:app-a3) expected='2001:db8:a3:40::20/64' ;;
+    A3.1.3:log-a3) expected='2001:db8:a3:30::10/64' ;;
+    A3.1.4:branch-user-a3) expected='10.33.10.1' ;;
+    A3.1.4:admin-a3) expected='10.33.20.1' ;;
+    A3.1.4:proxy-a3|A3.1.4:app-a3) expected='10.33.40.1' ;;
+    A3.1.4:log-a3) expected='10.33.30.1' ;;
+    A3.3.9:branch-user-a3|A3.3.9:admin-a3) expected='A3_PORTAL_OK' ;;
+  esac
+  if [ "\$semantic_rc" -eq 0 ] && [ "\$A3_CURRENT_ID" = A3.1.7 ]; then
+    expected='runtime net.ipv4.ip_forward=1 и persistent setting = 1'
+    count="\$(grep -Ec 'net\.ipv4\.ip_forward[[:space:]]*=[[:space:]]*1' "\$ssh_out" || true)"
+    [ "\$count" -ge 2 ] || semantic_rc=1
+  elif [ "\$semantic_rc" -eq 0 ] && [ "\$A3_CURRENT_ID" = A3.1.8 ]; then
+    expected='runtime net.ipv6.conf.all.forwarding=1 и persistent setting = 1'
+    count="\$(grep -Ec 'net\.ipv6\.conf\.all\.forwarding[[:space:]]*=[[:space:]]*1' "\$ssh_out" || true)"
+    [ "\$count" -ge 2 ] || semantic_rc=1
+  elif [ "\$semantic_rc" -eq 0 ] && [ -n "\$expected" ]; then
+    for item in \$expected; do
+      grep -Fq "\$item" "\$ssh_out" || semantic_rc=1
+    done
   fi
+  # Some remote compound checks already print a result for every nested target.
+  # Do not add a duplicate result for the outer transport host in that case.
+  if grep -Eq 'DEVICE .*: (PASS|FAIL)' "\$ssh_out"; then
+    rm -f "\$ssh_out"
+    return "\$rc"
+  fi
+  if [ "\$semantic_rc" -eq 0 ]; then
+    printf '\033[32mDEVICE %-18s (%s): PASS\033[0m\n' "\$device" "\$target"
+    printf '  Причина: команда на устройстве завершилась успешно (exit=0).\n'
+  else
+    if [ "\$rc" -ne 0 ]; then
+      printf '\033[31mDEVICE %-18s (%s): FAIL [ssh exit=%s]\033[0m\n' "\$device" "\$target" "\$rc"
+      case "\$rc" in
+        124) printf '  Причина: превышено время ожидания %s секунд; устройство или команда не ответили вовремя.\n' "\$A3_SSH_TIMEOUT" ;;
+        255) printf '  Причина: SSH не установил сеанс; проверьте маршрут, host key и аутентификацию.\n' ;;
+        127) printf '  Причина: проверочная команда отсутствует на устройстве.\n' ;;
+        *) printf '  Причина: команда завершилась с ненулевым кодом %s. Последние строки ошибки показаны выше.\n' "\$rc" ;;
+      esac
+    else
+      printf '\033[31mDEVICE %-18s (%s): FAIL [нет ожидаемого: %s]\033[0m\n' "\$device" "\$target" "\$expected"
+      printf '  Причина: SSH работает, но обязательное значение не найдено в выводе.\n'
+    fi
+  fi
+  rm -f "\$ssh_out"
   return "\$rc"
 }
 EOF
@@ -144,7 +212,7 @@ EOF
   rm -f "$tmp" "$out_file"
 }
 
-A3_EVIDENCE_RE='active|enabled|listening|LISTEN|UNCONN|10\.33\.|192\.0\.2\.|2001:db8:a3|10\.233\.3|fd00:a3:wg|nova\.a3\.test|branch-|hq-|admin-|proxy-|app-|log-|default|forward|SOA|NS|CNAME|PTR|REFUSED|status:|NOERROR|NXDOMAIN|SERVFAIL|subject=|issuer=|CA:TRUE|Certificate Sign|CRL Sign|Server Authentication|DNS:|Verify return code|ssl_verify_result|HTTP/|Location:|A3_|OK|PASS|FAIL|peer:|interface: wg0|latest handshake|allowed ips|transfer:|policy drop|reject|succeeded|refused|timed out|No route|Permission denied|/var/log/remote|root:|syslog:|nginx|8080|514|51820|Command:|Result:|none|packet loss|bytes from|ExitCode'
+A3_EVIDENCE_RE='active|enabled|listening|LISTEN|UNCONN|10\.33\.|192\.0\.2\.|2001:db8:a3|10\.233\.3|fd00:a3:|ALLOWED_IPS_|SSH_WG_|SSH_JUMP_|WG_SSH_PORT_|ADMIN_SSH_|BACKEND_TCP_|BACKEND_HEALTH_|ACCESS_EVENT_|LOG_EVIDENCE_|DNS_ALLOWED_|HTTP_ALLOWED_|HTTPS_ALLOWED_|nova\.a3\.test|branch-|hq-|admin-|proxy-|app-|log-|default|forward|SOA|NS|CNAME|PTR|REFUSED|status:|flags:|DNS_RECURSION|ROOT_CA_|PRIVATE_KEY|PORTAL_CERT_VERIFY|PORTAL_CONTENT_|TLS_VERIFY_|HEALTHZ_|APP_PROXY_|HTTP_STATUS=|CERTIFICATE=|NOERROR|NXDOMAIN|SERVFAIL|subject=|issuer=|CA:TRUE|Certificate Sign|CRL Sign|Server Authentication|DNS:|Verify return code|ssl_verify_result|HTTP/|Location:|A3_|OK|PASS|FAIL|peer:|interface: wg0|latest handshake|allowed ips|transfer:|policy drop|reject|succeeded|refused|timed out|No route|Permission denied|/var/log/remote|root:|syslog:|nginx|8080|514|51820|Command:|Result:|none|packet loss|bytes from|ExitCode'
 
 filter_output() {
   local out="$1" lines filtered
@@ -152,6 +220,50 @@ filter_output() {
   filtered="$(grep -Ei 'active|enabled|listening|LISTEN|UNCONN|10\.33\.|192\.0\.2\.|2001:db8:a3|10\.233\.3|fd00:a3:wg|nova\.a3\.test|branch-|hq-|admin-|proxy-|app-|log-|default|forward|SOA|NS|CNAME|PTR|REFUSED|status:|NOERROR|NXDOMAIN|SERVFAIL|subject=|issuer=|CA:TRUE|Certificate Sign|CRL Sign|Server Authentication|DNS:|Verify return code|ssl_verify_result|HTTP/|Location:|A3_|OK|PASS|FAIL|peer:|interface: wg0|latest handshake|allowed ips|transfer:|policy drop|reject|succeeded|refused|timed out|No route|Permission denied|/var/log/remote|root:|syslog:|nginx|8080|514|51820|Command:|Result:|none' <<<"$out" | sed -n '1,220p' || true)"
   if [ -n "$filtered" ]; then printf '%s\n' "$filtered"; [ "$lines" -le 220 ] || echo "... filtered from $lines lines ..."
   else sed -n '1,160p' <<<"$out"; fi
+}
+
+device_counts() {
+  # Return: "passed failed" for unique DEVICE names. Any FAIL overrides PASS
+  # when one device has several checks inside the same criterion.
+  awk '
+    /DEVICE[[:space:]]/ {
+      line=$0
+      gsub(/\033\[[0-9;]*m/, "", line)
+      sub(/^.*DEVICE[[:space:]]+/, "", line)
+      split(line, f, /[[:space:]]+/)
+      dev=f[1]
+      if (line ~ /:[[:space:]]+FAIL([[:space:]]|$)/) state[dev]="FAIL"
+      else if (line ~ /:[[:space:]]+PASS([[:space:]]|$)/ && state[dev]!="FAIL") state[dev]="PASS"
+    }
+    END {
+      for (d in state) if (state[d]=="PASS") p++; else if (state[d]=="FAIL") f++
+      printf "%d %d\n", p+0, f+0
+    }' <<<"$1"
+}
+
+failed_device_list() {
+  awk '
+    /DEVICE[[:space:]]/ {
+      line=$0; gsub(/\033\[[0-9;]*m/, "", line)
+      sub(/^.*DEVICE[[:space:]]+/, "", line); split(line, f, /[[:space:]]+/); dev=f[1]
+      if (line ~ /:[[:space:]]+FAIL([[:space:]]|$)/) state[dev]="FAIL"
+      else if (line ~ /:[[:space:]]+PASS([[:space:]]|$)/ && state[dev]!="FAIL") state[dev]="PASS"
+    }
+    END { for (d in state) if (state[d]=="FAIL") { if (out!="") out=out", "; out=out d } print out }' <<<"$1"
+}
+
+failure_reason() {
+  local out="$1" rc="$2" expected="$3" devices
+  devices="$(failed_device_list "$out")"
+  if [ -n "$devices" ]; then
+    printf 'не прошли устройства: %s. Ожидалось: %s' "$devices" "$expected"
+  elif [ "$rc" -eq 124 ]; then
+    printf 'превышено время выполнения критерия. Ожидалось: %s' "$expected"
+  elif [ "$rc" -ne 0 ]; then
+    printf 'проверочная команда завершилась с exit=%s. Ожидалось: %s' "$rc" "$expected"
+  else
+    printf 'обязательные признаки не найдены в фактическом выводе. Ожидалось: %s' "$expected"
+  fi
 }
 
 no_successful_connect() { ! grep -Eiq 'succeeded|open|A3_(APP|PORTAL)_|bytes from' <<<"$1"; }
@@ -181,20 +293,20 @@ evaluate_result() {
     A3.2.7) [ "$(count_regex "$o" 'proxy-a3\.nova\.a3\.test')" -ge 2 ] ;;
     A3.2.8) [ "$(count_regex "$o" 'nova\.a3\.test')" -ge 11 ] ;;
     A3.2.9) contains_all "$o" hq-fw-wg-a3 branch-user-wg-a3 ;;
-    A3.2.10) ! grep -Eiq 'REFUSED' <<<"$o" && [ -n "$o" ] ;;
+    A3.2.10) contains_all "$o" "DNS_RECURSION_OK branch-user-a3" "DNS_RECURSION_OK admin-a3" "DNS_RECURSION_OK app-a3" "DNS_RECURSION_OK log-a3" && ! grep -Fq DNS_RECURSION_FAIL <<<"$o" ;;
     A3.2.11) regex_any "$o" 'REFUSED|timed out|no servers could be reached' && ! regex_any "$o" 'status: NOERROR' ;;
     A3.2.12) [ "$(count_regex "$o" '10\.33\.40\.10|127\.0\.0\.1')" -ge 7 ] ;;
     A3.2.13) contains_all "$o" proxy-a3 app-a3 log-a3 ;;
     A3.2.14) [ "$rc" -eq 0 ] && regex_any "$o" 'SOA|proxy-a3' ;;
     A3.2.15) ! regex_any "$o" '8\.8\.8\.8|1\.1\.1\.1|9\.9\.9\.9' ;;
 
-    A3.3.1) regex_any "$o" 'CN ?= ?Nova A3 Root CA|CN=Nova A3 Root CA' ;;
+    A3.3.1) grep -Fq ROOT_CA_SUBJECT_OK <<<"$o" && regex_any "$o" 'CN[[:space:]]*=[[:space:]]*Nova A3 Root CA' ;;
     A3.3.2) regex_all "$o" 'CA:TRUE' 'Certificate Sign|keyCertSign' 'CRL Sign|cRLSign' ;;
-    A3.3.3) regex_any "$o" '(^|[[:space:]])(600|640)[[:space:]]+root' && ! regex_any "$o" 'BEGIN (RSA )?PRIVATE KEY' ;;
-    A3.3.4) regex_any "$o" ': OK|OK$' ;;
+    A3.3.3) grep -Fq PRIVATE_KEY_SECURITY_OK <<<"$o" && grep -Fq PRIVATE_KEY_WEB_NOT_EXPOSED <<<"$o" && ! grep -Fq PRIVATE_KEY_SECURITY_FAIL <<<"$o" ;;
+    A3.3.4) grep -Fq PORTAL_CERT_VERIFY_OK <<<"$o" && ! grep -Fq PORTAL_CERT_VERIFY_FAIL <<<"$o" ;;
     A3.3.5) contains_all "$o" DNS:proxy-a3.nova.a3.test DNS:portal.nova.a3.test DNS:www.nova.a3.test ;;
     A3.3.6) regex_any "$o" 'TLS Web Server Authentication|serverAuth' && ! grep -Fq 'CA:TRUE' <<<"$o" ;;
-    A3.3.7) [ "$(count_regex "$o" 'ssl_verify_result[^0-9]*0|Verify return code: 0')" -ge 2 ] ;;
+    A3.3.7) contains_all "$o" "TLS_VERIFY_OK branch-user-a3" "TLS_VERIFY_OK admin-a3" && ! grep -Fq TLS_VERIFY_FAIL <<<"$o" ;;
     A3.3.8) [ "$rc" -eq 0 ] && [ "$(count_regex "$o" 'Nova A3 Root CA|nova.*\.crt|ca-certificates')" -ge 2 ] ;;
     A3.3.9) [ "$rc" -eq 0 ] && [ "$(count_regex "$o" '^A3_PORTAL_OK$')" -ge 2 ] ;;
     A3.3.10) regex_all "$o" 'HTTP/.*30(1|2|8)' 'Location: https://portal\.nova\.a3\.test' ;;
@@ -203,11 +315,11 @@ evaluate_result() {
 
     A3.4.1) regex_any "$o" 'LISTEN.*:8080|:8080.*LISTEN' ;;
     A3.4.2) grep -Fxq A3_APP_INTERNAL_OK <<<"$o" ;;
-    A3.4.3) grep -Fxq OK <<<"$o" ;;
+    A3.4.3) grep -Fq HEALTHZ_OK <<<"$o" && grep -Fq HTTP_STATUS=200 <<<"$o" && ! grep -Fq HEALTHZ_FAIL <<<"$o" ;;
     A3.4.4|A3.4.11|A3.6.5) no_successful_connect "$o" ;;
     A3.4.5) regex_all "$o" 'active' ':80' ':443' ;;
-    A3.4.6) grep -Fxq A3_PORTAL_OK <<<"$o" ;;
-    A3.4.7) grep -Fxq A3_APP_INTERNAL_OK <<<"$o" ;;
+    A3.4.6) grep -Fq PORTAL_CONTENT_OK <<<"$o" && grep -Fq HTTP_STATUS=200 <<<"$o" && ! grep -Fq PORTAL_CONTENT_FAIL <<<"$o" ;;
+    A3.4.7) grep -Fq APP_PROXY_OK <<<"$o" && grep -Fq HTTP_STATUS=200 <<<"$o" && ! grep -Fq APP_PROXY_FAIL <<<"$o" ;;
     A3.4.8) grep -Fxq OK <<<"$o" ;;
     A3.4.9) regex_all "$o" 'HTTP/.*30(1|2|8)' 'Location: https://' ;;
     A3.4.10) regex_all "$o" 'proxy_pass' 'app-a3|10\.33\.40\.20' '8080' && ! regex_any "$o" 'https?://[^ ;]*(debian|ubuntu|github)' ;;
@@ -221,11 +333,11 @@ evaluate_result() {
     A3.5.3) contains_all "$o" 10.233.3.10 fd00:a3:wg::10 ;;
     A3.5.4) regex_any "$o" '51820' && ! regex_any "$o" 'Connection refused|No route' ;;
     A3.5.5) regex_all "$o" 'peer:' 'latest handshake:' 'transfer:' && ! regex_any "$o" 'latest handshake: *(never|$)' ;;
-    A3.5.6) contains_all "$o" 10.233.3.1/32 fd00:a3:wg::1/128 && ! regex_any "$o" '0\.0\.0\.0/0|::/0|10\.33\.(20|30|40)\.0/24' ;;
+    A3.5.6) grep -Fq ALLOWED_IPS_OK <<<"$o" && ! grep -Fq ALLOWED_IPS_FAIL <<<"$o" ;;
     A3.5.7) ! grep -E '10\.33\.(30|40)\..*dev wg0' <<<"$o" ;;
-    A3.5.8) grep -Fq hq-fw-a3 <<<"$o" ;;
+    A3.5.8) grep -Fq SSH_WG_OK <<<"$o" && grep -Fq hq-fw-a3 <<<"$o" && ! grep -Fq SSH_WG_FAIL <<<"$o" ;;
     A3.5.9) grep -Fq proxy-a3 <<<"$o" ;;
-    A3.5.10) contains_all "$o" app-a3 log-a3 ;;
+    A3.5.10) contains_all "$o" "SSH_JUMP_OK app-a3" "SSH_JUMP_OK log-a3" && ! grep -Fq SSH_JUMP_FAIL <<<"$o" ;;
     A3.5.11|A3.6.6|A3.6.12|A3.6.13) no_successful_connect "$o" ;;
     A3.5.12) [ "$rc" -eq 0 ] && grep -Fq '0% packet loss' <<<"$o" ;;
     A3.5.13) [ "$rc" -eq 0 ] && regex_all "$o" '0% packet loss' 'peer:' ;;
@@ -233,11 +345,11 @@ evaluate_result() {
 
     A3.6.1|A3.6.2) regex_all "$o" 'active' 'table|chain|hook' ;;
     A3.6.3) regex_any "$o" 'policy drop|reject|drop' ;;
-    A3.6.4) [ "$rc" -eq 0 ] && regex_all "$o" '53.*succeeded|open.*53|status: NOERROR' '80.*succeeded|HTTP/.*30' '443.*succeeded|A3_PORTAL_OK' ;;
-    A3.6.7) grep -Fq hq-fw-a3 <<<"$o" ;;
+    A3.6.4) [ "$rc" -eq 0 ] && contains_all "$o" "DNS_ALLOWED_OK proxy-a3:53" "HTTP_ALLOWED_OK proxy-a3:80" "HTTPS_ALLOWED_OK proxy-a3:443" && ! regex_any "$o" 'DNS_ALLOWED_FAIL|HTTP_ALLOWED_FAIL|HTTPS_ALLOWED_FAIL' ;;
+    A3.6.7) grep -Fq 'WG_SSH_PORT_OK 10.233.3.1:22' <<<"$o" && ! grep -Fq WG_SSH_PORT_FAIL <<<"$o" ;;
     A3.6.8) contains_all "$o" proxy-a3 app-a3 log-a3 ;;
-    A3.6.9) contains_all "$o" branch-fw-a3 branch-user-a3 hq-fw-a3 proxy-a3 app-a3 log-a3 ;;
-    A3.6.10) regex_any "$o" 'succeeded|open' && grep -Fxq OK <<<"$o" ;;
+    A3.6.9) [ "$rc" -eq 0 ] && contains_all "$o" "ADMIN_SSH_OK branch-fw-a3" "ADMIN_SSH_OK branch-user-a3" "ADMIN_SSH_OK hq-fw-a3" "ADMIN_SSH_OK proxy-a3" "ADMIN_SSH_OK app-a3" "ADMIN_SSH_OK log-a3" && ! grep -Fq ADMIN_SSH_FAIL <<<"$o" ;;
+    A3.6.10) [ "$rc" -eq 0 ] && contains_all "$o" "BACKEND_TCP_OK app-a3:8080" BACKEND_HEALTH_OK && ! regex_any "$o" 'BACKEND_TCP_FAIL|BACKEND_HEALTH_FAIL' ;;
     A3.6.11) [ "$(count_regex "$o" 'succeeded|open')" -ge 4 ] ;;
     A3.6.14) ! regex_any "$o" 'refused|No route|timed out' ;;
     A3.6.15) [ "$(count_regex "$o" '0% packet loss')" -ge 4 ] ;;
@@ -247,12 +359,12 @@ evaluate_result() {
     A3.7.2) contains_all "$o" branch-fw-a3.log hq-fw-a3.log ;;
     A3.7.3) contains_all "$o" proxy-a3.log app-a3.log ;;
     A3.7.4) regex_any "$o" 'A3-BR-DROP|A3-HQ-DROP' ;;
-    A3.7.5) regex_all "$o" 'nginx|portal' '/app' ;;
+    A3.7.5) contains_all "$o" ACCESS_EVENT_GENERATED ACCESS_EVENT_LOG_OK && ! grep -Fq ACCESS_EVENT_LOG_FAIL <<<"$o" ;;
     A3.7.6) regex_all "$o" 'nginx|error' '/var/log/remote|proxy-a3.log' ;;
     A3.7.7) grep -Fq A3_APP_LOG_TEST <<<"$o" ;;
     A3.7.8) regex_any "$o" 'root|syslog' && ! regex_any "$o" '(^|[[:space:]])(666|667|677|777)[[:space:]]' ;;
     A3.7.9) grep -Fq A3_LOG_RESTART_TEST <<<"$o" ;;
-    A3.7.10) regex_all "$o" 'log-a3|/var/log/remote|A3-.*-DROP|nginx' 'PASS|FAIL|Result:' ;;
+    A3.7.10) contains_all "$o" LOG_EVIDENCE_CONTENT_OK LOG_EVIDENCE_RESULT_OK LOG_EVIDENCE_OK && ! regex_any "$o" 'LOG_EVIDENCE_CONTENT_FAIL|LOG_EVIDENCE_RESULT_FAIL|LOG_EVIDENCE_FAIL:' ;;
 
     A3.8.1) contains_all "$o" branch-fw-a3 branch-user-a3 hq-fw-a3 proxy-a3 app-a3 log-a3 ;;
     A3.8.2) regex_any "$o" '/opt/grading/a3' ;;
@@ -287,7 +399,7 @@ main() {
   echo "Отчеты: $A3_REPORT_DIR"
   ssh_precheck
 
-  local id sub desc mark runfrom commands expected notes command display last_sub=""
+  local id sub desc mark runfrom commands expected notes command display last_sub="" passed failed total awarded failed_names reason
   while IFS=$'\t' read -r id sub desc mark runfrom commands expected notes; do
     [ "$id" = CriterionID ] && continue
     [ -n "$id" ] || continue
@@ -305,13 +417,23 @@ main() {
       command="$(decode_newlines "$commands")"
     fi
     step "$id" "$desc"; cmd_show "$command"
-    run_command "$command"
+    run_command "$command" "$id"
     # Raw output is already streamed to screen and detail.log by run_command.
     show_output "ExitCode=$A3_LAST_RC (вывод показан выше по мере выполнения)"
-    if evaluate_result "$id" "$A3_LAST_OUT" "$A3_LAST_RC"; then
+    read -r passed failed <<<"$(device_counts "$A3_LAST_OUT")"
+    total=$((passed + failed))
+    # A mixed per-device result always has priority over the aggregate parser:
+    # one successful device must not turn failures on other devices into full PASS.
+    if [ "$total" -gt 1 ] && [ "$passed" -gt 0 ] && [ "$failed" -gt 0 ]; then
+      awarded="$(awk -v m="$mark" -v p="$passed" -v t="$total" 'BEGIN { printf "%.3f", m*p/t }')"
+      failed_names="$(failed_device_list "$A3_LAST_OUT")"
+      show_output "По устройствам: PASS=$passed, FAIL=$failed; не прошли: ${failed_names:-не определено}; начислено $awarded из $mark"
+      part "$id" "$mark" "$awarded" "$passed/$total устройств прошли; не прошли: ${failed_names:-не определено}. Ожидалось: $expected"
+    elif evaluate_result "$id" "$A3_LAST_OUT" "$A3_LAST_RC"; then
       pass "$id" "$mark" "фактический вывод соответствует ожидаемому результату"
     else
-      fail "$id" "$mark" "фактический вывод не соответствует ожидаемому результату"
+      reason="$(failure_reason "$A3_LAST_OUT" "$A3_LAST_RC" "$expected")"
+      fail "$id" "$mark" "$reason"
     fi
   done < "$A3_CRITERIA_MAP"
   write_summary
