@@ -74,7 +74,7 @@ sudo bash remote/a3-evaluate-remote.sh --post-reboot \
   --start-from A3.1.12 --report-dir /opt/grading/a3/post-reboot-report
 ```
 
-Этот режим может перезапускать bind9, nginx, приложение, WireGuard и rsyslog.
+Этот режим может перезапускать bind9, активный nginx/Apache, приложение, WireGuard и rsyslog.
 
 ## Локальный fallback
 

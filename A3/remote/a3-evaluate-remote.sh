@@ -186,8 +186,8 @@ ssh root@10.33.10.1 'sysctl net.ipv4.ip_forward net.ipv6.conf.all.forwarding'; s
 EOF
       ;;
     A3.2.14) echo "ssh root@10.33.40.10 'systemctl restart bind9 2>/dev/null || systemctl restart named; dig @127.0.0.1 nova.a3.test SOA +short'" ;;
-    A3.3.12) echo "ssh root@10.33.40.10 'systemctl restart nginx'; ssh root@10.33.10.20 'curl -fsS https://portal.nova.a3.test/'" ;;
-    A3.4.14) echo "ssh root@10.33.40.20 'systemctl restart a3-app 2>/dev/null || systemctl restart a3-app.service'; ssh root@10.33.40.10 'systemctl restart nginx'; ssh root@10.33.20.20 'curl -fsS https://portal.nova.a3.test/app; curl -fsS https://portal.nova.a3.test/healthz'" ;;
+    A3.3.12) echo "ssh root@10.33.40.10 'if systemctl is-active --quiet nginx; then systemctl restart nginx; elif systemctl is-active --quiet apache2; then systemctl restart apache2; elif systemctl is-active --quiet httpd; then systemctl restart httpd; else exit 1; fi'; ssh root@10.33.10.20 'curl -fsS https://portal.nova.a3.test/'" ;;
+    A3.4.14) echo "ssh root@10.33.40.20 'systemctl restart a3-app 2>/dev/null || systemctl restart a3-app.service'; ssh root@10.33.40.10 'if systemctl is-active --quiet nginx; then systemctl restart nginx; elif systemctl is-active --quiet apache2; then systemctl restart apache2; elif systemctl is-active --quiet httpd; then systemctl restart httpd; else exit 1; fi'; ssh root@10.33.20.20 'curl -fsS https://portal.nova.a3.test/app; curl -fsS https://portal.nova.a3.test/healthz'" ;;
     A3.5.13) cat <<'EOF'
 ssh root@10.33.20.1 'iface=$(wg show interfaces 2>/dev/null | awk "{print \$1}"); echo "WG_RESTART_INTERFACE=$iface"; [ -n "$iface" ] || { echo "WG_RESTART_FAIL hq-fw-a3 no-interface"; exit 1; }; [ -f "/etc/wireguard/$iface.conf" ] || { echo "WG_RESTART_FAIL hq-fw-a3 missing=/etc/wireguard/$iface.conf"; exit 1; }; systemctl restart "wg-quick@$iface" || { systemctl status "wg-quick@$iface" --no-pager -l; echo "WG_RESTART_FAIL hq-fw-a3 unit=wg-quick@$iface"; exit 1; }; wg show "$iface"; wg show "$iface" peers | grep -q . || { echo "WG_RESTART_FAIL hq-fw-a3 no-peer"; exit 1; }; echo "WG_RESTART_OK hq-fw-a3 interface=$iface"'
 ssh root@10.33.10.20 'iface=$(wg show interfaces 2>/dev/null | awk "{print \$1}"); echo "WG_RESTART_INTERFACE=$iface"; [ -n "$iface" ] || { echo "WG_RESTART_FAIL branch-user-a3 no-interface"; exit 1; }; [ -f "/etc/wireguard/$iface.conf" ] || { echo "WG_RESTART_FAIL branch-user-a3 missing=/etc/wireguard/$iface.conf"; exit 1; }; systemctl restart "wg-quick@$iface" || { systemctl status "wg-quick@$iface" --no-pager -l; echo "WG_RESTART_FAIL branch-user-a3 unit=wg-quick@$iface"; exit 1; }; sleep 3; wg show "$iface"; ping -c3 -W2 10.233.3.1 || { echo "WG_RESTART_FAIL branch-user-a3 ping"; exit 1; }; echo "WG_RESTART_OK branch-user-a3 interface=$iface"'
@@ -327,12 +327,12 @@ EOF
   rm -f "$tmp" "$out_file"
 }
 
-A3_EVIDENCE_RE='active|enabled|listening|LISTEN|UNCONN|10\.33\.|192\.0\.2\.|2001:db8:a3|10\.233\.3|fd00:a3:|IPV4_FORWARD_|IPV6_FORWARD_|DNS_SOA_|DNS_NS_|ALLOWED_IPS_|SSH_WG_|SSH_JUMP_|WG_SSH_PORT_|ADMIN_SSH_|BACKEND_TCP_|BACKEND_HEALTH_|ACCESS_EVENT_|LOG_EVIDENCE_|DNS_ALLOWED_|HTTP_ALLOWED_|HTTPS_ALLOWED_|nova\.a3\.test|branch-|hq-|admin-|proxy-|app-|log-|default|forward|SOA|NS|CNAME|PTR|REFUSED|status:|flags:|DNS_RECURSION|ROOT_CA_|PRIVATE_KEY|PORTAL_CERT_VERIFY|PORTAL_CONTENT_|TLS_VERIFY_|HEALTHZ_|APP_PROXY_|HTTP_STATUS=|CERTIFICATE=|NOERROR|NXDOMAIN|SERVFAIL|subject=|issuer=|CA:TRUE|Certificate Sign|CRL Sign|Server Authentication|DNS:|Verify return code|ssl_verify_result|HTTP/|Location:|A3_|OK|PASS|FAIL|peer:|interface: wg0|latest handshake|allowed ips|transfer:|policy drop|reject|succeeded|refused|timed out|No route|Permission denied|/var/log/remote|root:|syslog:|nginx|8080|514|51820|Command:|Result:|none|packet loss|bytes from|ExitCode'
+A3_EVIDENCE_RE='active|enabled|listening|LISTEN|UNCONN|10\.33\.|192\.0\.2\.|2001:db8:a3|10\.233\.3|fd00:a3:|IPV4_FORWARD_|IPV6_FORWARD_|DNS_SOA_|DNS_NS_|ALLOWED_IPS_|SSH_WG_|SSH_JUMP_|WG_SSH_PORT_|ADMIN_SSH_|BACKEND_TCP_|BACKEND_HEALTH_|ACCESS_EVENT_|LOG_EVIDENCE_|DNS_ALLOWED_|HTTP_ALLOWED_|HTTPS_ALLOWED_|nova\.a3\.test|branch-|hq-|admin-|proxy-|app-|log-|default|forward|SOA|NS|CNAME|PTR|REFUSED|status:|flags:|DNS_RECURSION|ROOT_CA_|PRIVATE_KEY|PORTAL_CERT_VERIFY|PORTAL_CONTENT_|TLS_VERIFY_|HEALTHZ_|APP_PROXY_|HTTP_STATUS=|CERTIFICATE=|WEB_SERVER=|NOERROR|NXDOMAIN|SERVFAIL|subject=|issuer=|CA:TRUE|Certificate Sign|CRL Sign|Server Authentication|DNS:|Verify return code|ssl_verify_result|HTTP/|Location:|A3_|OK|PASS|FAIL|peer:|interface: wg0|latest handshake|allowed ips|transfer:|policy drop|reject|succeeded|refused|timed out|No route|Permission denied|/var/log/remote|root:|syslog:|nginx|apache|httpd|8080|514|51820|Command:|Result:|none|packet loss|bytes from|ExitCode'
 
 filter_output() {
   local out="$1" lines filtered
   lines="$(wc -l <<<"$out")"
-  filtered="$(grep -Ei 'active|enabled|listening|LISTEN|UNCONN|10\.33\.|192\.0\.2\.|2001:db8:a3|10\.233\.3|fd00:a3:wg|nova\.a3\.test|branch-|hq-|admin-|proxy-|app-|log-|default|forward|SOA|NS|CNAME|PTR|REFUSED|status:|NOERROR|NXDOMAIN|SERVFAIL|subject=|issuer=|CA:TRUE|Certificate Sign|CRL Sign|Server Authentication|DNS:|Verify return code|ssl_verify_result|HTTP/|Location:|A3_|OK|PASS|FAIL|peer:|interface: wg0|latest handshake|allowed ips|transfer:|policy drop|reject|succeeded|refused|timed out|No route|Permission denied|/var/log/remote|root:|syslog:|nginx|8080|514|51820|Command:|Result:|none' <<<"$out" | sed -n '1,220p' || true)"
+  filtered="$(grep -Ei 'active|enabled|listening|LISTEN|UNCONN|10\.33\.|192\.0\.2\.|2001:db8:a3|10\.233\.3|fd00:a3:wg|nova\.a3\.test|branch-|hq-|admin-|proxy-|app-|log-|default|forward|SOA|NS|CNAME|PTR|REFUSED|status:|NOERROR|NXDOMAIN|SERVFAIL|subject=|issuer=|CA:TRUE|Certificate Sign|CRL Sign|Server Authentication|DNS:|Verify return code|ssl_verify_result|HTTP/|Location:|WEB_SERVER=|A3_|OK|PASS|FAIL|peer:|interface: wg0|latest handshake|allowed ips|transfer:|policy drop|reject|succeeded|refused|timed out|No route|Permission denied|/var/log/remote|root:|syslog:|nginx|apache|httpd|8080|514|51820|Command:|Result:|none' <<<"$out" | sed -n '1,220p' || true)"
   if [ -n "$filtered" ]; then printf '%s\n' "$filtered"; [ "$lines" -le 220 ] || echo "... filtered from $lines lines ..."
   else sed -n '1,160p' <<<"$out"; fi
 }
@@ -437,9 +437,9 @@ evaluate_result() {
     A3.4.7) grep -Fq APP_PROXY_OK <<<"$o" && grep -Fq HTTP_STATUS=200 <<<"$o" && ! grep -Fq APP_PROXY_FAIL <<<"$o" ;;
     A3.4.8) grep -Fxq OK <<<"$o" ;;
     A3.4.9) regex_all "$o" 'HTTP/.*30(1|2|8)' 'Location: https://' ;;
-    A3.4.10) regex_all "$o" 'proxy_pass' 'app-a3|10\.33\.40\.20' '8080' && ! regex_any "$o" 'https?://[^ ;]*(debian|ubuntu|github)' ;;
-    A3.4.12) regex_all "$o" 'access\.log' 'error\.log' ;;
-    A3.4.13) regex_all "$o" 'syntax is ok|test is successful' '8080' ;;
+    A3.4.10) regex_all "$o" 'WEB_SERVER=(nginx|apache)' 'proxy_pass|ProxyPass' 'app-a3|10\.33\.40\.20' '8080' && ! regex_any "$o" 'https?://[^ ;]*(debian|ubuntu|github)' ;;
+    A3.4.12) regex_all "$o" 'WEB_SERVER=(nginx|apache)' 'access(_|\.)log|access_log' 'error(_|\.)log|error_log' ;;
+    A3.4.13) regex_all "$o" 'WEB_SERVER=(nginx|apache)' 'syntax is ok|test is successful|Syntax OK' '8080' ;;
     A3.4.14) [ "$rc" -eq 0 ] && contains_all "$o" A3_APP_INTERNAL_OK OK ;;
     A3.4.15) regex_all "$o" 'issuer=.*Nova A3 Root CA' 'subject=' ;;
 
@@ -475,7 +475,7 @@ evaluate_result() {
     A3.7.3) contains_all "$o" proxy-a3.log app-a3.log ;;
     A3.7.4) regex_any "$o" 'A3-BR-DROP|A3-HQ-DROP' ;;
     A3.7.5) contains_all "$o" ACCESS_EVENT_GENERATED ACCESS_EVENT_LOG_OK && ! grep -Fq ACCESS_EVENT_LOG_FAIL <<<"$o" ;;
-    A3.7.6) regex_all "$o" 'nginx|error' '/var/log/remote|proxy-a3.log' ;;
+    A3.7.6) regex_all "$o" 'WEB_SERVER=(nginx|apache)' 'nginx|apache|httpd|error' '/var/log/remote|proxy-a3.log' ;;
     A3.7.7) grep -Fq A3_APP_LOG_TEST <<<"$o" ;;
     A3.7.8) regex_any "$o" 'root|syslog' && ! regex_any "$o" '(^|[[:space:]])(666|667|677|777)[[:space:]]' ;;
     A3.7.9) grep -Fq A3_LOG_RESTART_TEST <<<"$o" ;;

@@ -51,7 +51,7 @@ case "$HN" in
   proxy-a3)
     capture A3.2.1 0.20 "authoritative DNS" "systemctl is-active bind9 named 2>/dev/null || true; ss -lntup | grep :53; dig @127.0.0.1 nova.a3.test SOA"
     capture A3.3.1 0.25 "local CA" "find /opt/a3-ca -maxdepth 2 -type f -ls; for f in /opt/a3-ca/*.crt /opt/a3-ca/*.pem; do openssl x509 -in \"\$f\" -noout -subject -issuer -ext subjectAltName 2>/dev/null; done"
-    capture A3.4.5 0.25 "nginx/reverse proxy" "systemctl is-active nginx; nginx -t; ss -lntp | grep -E ':80|:443'; curl -fsS https://portal.nova.a3.test/healthz"
+    capture A3.4.5 0.25 "web/reverse proxy" "if systemctl is-active --quiet nginx; then echo WEB_SERVER=nginx; systemctl is-active nginx; nginx -t; elif systemctl is-active --quiet apache2; then echo WEB_SERVER=apache; systemctl is-active apache2; apache2ctl configtest; elif systemctl is-active --quiet httpd; then echo WEB_SERVER=apache; systemctl is-active httpd; httpd -t; else echo WEB_SERVER_NOT_FOUND; exit 1; fi; ss -lntp | grep -E ':80|:443'; curl -fsS https://portal.nova.a3.test/healthz"
     ;;
   app-a3)
     capture A3.4.1 0.25 "application backend" "ss -lntp | grep :8080; curl -fsS http://127.0.0.1:8080/; curl -fsS http://127.0.0.1:8080/healthz"
