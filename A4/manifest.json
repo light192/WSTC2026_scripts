@@ -1,0 +1,15 @@
+{
+  "name": "A4_Evaluation_Scripts_Shanghai_Shenzhen",
+  "module": "A4",
+  "structure_source": "A3",
+  "marking_scheme_source": "Module A/A4_Marking_Scheme_Shanghai_Shenzhen_Detailed_HowToMark_v2_RU.xlsx",
+  "task_source": "Module A/A4_Competitor_Task_EN_styled.pdf",
+  "recommended_remote_launch_host": "maint-a4",
+  "recommended_remote_launch_ip": "10.44.20.20",
+  "domain": "cedar.a4.local",
+  "remote_script": "remote/a4-evaluate-remote.sh",
+  "local_script": "local/a4-local-check.sh",
+  "criteria_map": "criteria/a4_criteria_map.tsv",
+  "criteria_count": 109,
+  "total_marks": 25.0
+}
