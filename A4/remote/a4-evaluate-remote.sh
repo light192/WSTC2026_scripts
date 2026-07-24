@@ -10,6 +10,10 @@ A4_START_FROM="${A4_START_FROM:-A4.1.1}"
 A4_POST_REBOOT="${A4_POST_REBOOT:-0}"
 A4_LAST_RC=0
 A4_LAST_OUT=""
+A4_COMPONENT_PASS=0
+A4_COMPONENT_TOTAL=0
+A4_COMPONENT_MESSAGE=""
+A4_BUILD="2026-07-24.5"
 
 usage() {
   cat <<'EOF'
@@ -103,6 +107,147 @@ mount_matches() {
   [ -n "$line" ] && [ "$line" != "<NOT-MOUNTED>" ] &&
     grep -Fqi "$expected_lv" <<<"$line"
 }
+group_matches() {
+  local text="$1" host="$2" group="$3" gid="$4"
+  grep -Fqi "HOST=${host};GROUP=${group};ACTUAL=${group}:x:${gid}:" <<<"$text"
+}
+component_reset() {
+  A4_COMPONENT_PASS=0
+  A4_COMPONENT_TOTAL=0
+  A4_COMPONENT_MESSAGE=""
+}
+component_check() {
+  local label="$1"
+  shift
+  A4_COMPONENT_TOTAL=$((A4_COMPONENT_TOTAL + 1))
+  if "$@"; then
+    A4_COMPONENT_PASS=$((A4_COMPONENT_PASS + 1))
+    echo -e "${GREEN}[PASS]${NC} $label"
+  else
+    echo -e "${RED}[FAIL]${NC} $label"
+  fi
+}
+text_has_fixed() { grep -Fqi "$2" <<<"$1"; }
+text_has_regex() { grep -Eiq "$2" <<<"$1"; }
+manifest_hashes_valid() {
+  awk 'NF {
+    if ($1 !~ /^[[:xdigit:]]{64}$/) bad=1
+    count++
+  } END { exit !(count>0 && !bad) }' <<<"$1"
+}
+manifest_paths_relative() {
+  awk 'NF {
+    path=$2
+    if (path=="" || path ~ /^\// || path ~ /(^|\/)\.\.(\/|$)/) bad=1
+    count++
+  } END { exit !(count>0 && !bad) }' <<<"$1"
+}
+
+evaluate_components() {
+  local id="$1" o="$2" actual host group gid
+  component_reset
+  case "$id" in
+    A4.1.16)
+      echo -e "${BLUE}Покомпонентная оценка:${NC}"
+      component_check "dns.${A4_DOMAIN} -> log-a4.${A4_DOMAIN}." \
+        text_has_fixed "$o" 'CNAME=dns;ACTUAL=log-a4.cedar.a4.local.'
+      component_check "log.${A4_DOMAIN} -> log-a4.${A4_DOMAIN}." \
+        text_has_fixed "$o" 'CNAME=log;ACTUAL=log-a4.cedar.a4.local.'
+      component_check "files.${A4_DOMAIN} -> storage-a4.${A4_DOMAIN}." \
+        text_has_fixed "$o" 'CNAME=files;ACTUAL=storage-a4.cedar.a4.local.'
+      component_check "backup.${A4_DOMAIN} -> storage-a4.${A4_DOMAIN}." \
+        text_has_fixed "$o" 'CNAME=backup;ACTUAL=storage-a4.cedar.a4.local.'
+      component_check "storage.${A4_DOMAIN} -> storage-a4.${A4_DOMAIN}." \
+        text_has_fixed "$o" 'CNAME=storage;ACTUAL=storage-a4.cedar.a4.local.'
+      component_check "svc.${A4_DOMAIN} -> svc-a4.${A4_DOMAIN}." \
+        text_has_fixed "$o" 'CNAME=svc;ACTUAL=svc-a4.cedar.a4.local.'
+      ;;
+    A4.2.7)
+      echo -e "${BLUE}Покомпонентная оценка:${NC}"
+      component_check "/srv/projects активен и использует lv_projects" \
+        mount_matches "$o" /srv/projects lv_projects
+      component_check "/srv/backups активен и использует lv_backups" \
+        mount_matches "$o" /srv/backups lv_backups
+      component_check "/srv/archive активен и использует lv_archive" \
+        mount_matches "$o" /srv/archive lv_archive
+      ;;
+    A4.3.1)
+      echo -e "${BLUE}Покомпонентная оценка:${NC}"
+      while IFS='|' read -r host group gid; do
+        component_check "${host}: ${group}, GID=${gid}" \
+          group_matches "$o" "$host" "$group" "$gid"
+      done <<'EOF'
+storage-a4|projectops|7440
+storage-a4|auditors|7450
+maint-a4|projectops|7440
+maint-a4|auditors|7450
+sh-operator-a4|projectops|7440
+sh-operator-a4|auditors|7450
+EOF
+      ;;
+    A4.3.2)
+      echo -e "${BLUE}Покомпонентная оценка:${NC}"
+      # Each user on each of the three required nodes is one independently scored component.
+      for host in 10.44.30.10 10.44.20.20 10.44.10.20; do
+        actual="$(awk -v marker="===$host===" '
+          $0==marker {inhost=1; next}
+          /^===/ {inhost=0}
+          inhost {print}
+        ' <<<"$o")"
+        component_check "${host}: olga UID=8441, group projectops" \
+          bash -c 'grep -Eq "uid=8441\\(olga\\).*projectops" <<<"$1"' _ "$actual"
+        component_check "${host}: danil UID=8442, group auditors" \
+          bash -c 'grep -Eq "uid=8442\\(danil\\).*auditors" <<<"$1"' _ "$actual"
+      done
+      ;;
+    A4.3.3)
+      echo -e "${BLUE}Покомпонентная оценка:${NC}"
+      component_check "backupsvc существует с UID=8490" \
+        text_has_regex "$o" 'uid=8490\(backupsvc\)'
+      component_check "backupsvc состоит в backupops" \
+        text_has_regex "$o" '^GROUPS=.*backupops([[:space:]]|$)|^backupops:x:[0-9]+:.*backupsvc'
+      ;;
+    A4.3.13)
+      echo -e "${BLUE}Покомпонентная оценка:${NC}"
+      component_check "maint-a4: olga может создать файл через NFS" \
+        text_has_fixed "$o" 'HOST=maint-a4;OLGA_WRITE=PASS'
+      component_check "sh-operator-a4: olga может создать файл через NFS" \
+        text_has_fixed "$o" 'HOST=sh-operator-a4;OLGA_WRITE=PASS'
+      ;;
+    A4.3.14)
+      echo -e "${BLUE}Покомпонентная оценка:${NC}"
+      component_check "maint-a4: danil читает каталог, запись запрещена" \
+        text_has_fixed "$o" 'HOST=maint-a4;DANIL_READ_NO_WRITE=PASS'
+      component_check "sh-operator-a4: danil читает каталог, запись запрещена" \
+        text_has_fixed "$o" 'HOST=sh-operator-a4;DANIL_READ_NO_WRITE=PASS'
+      ;;
+    A4.4.3)
+      echo -e "${BLUE}Покомпонентная оценка:${NC}"
+      component_check "backupsvc может писать в /srv/backups/svc-a4" \
+        text_has_fixed "$o" BACKUP_WRITE_OK
+      component_check "backupsvc не может писать в /srv/projects" \
+        text_has_fixed "$o" PROJECTS_DENIED
+      component_check "backupsvc не может писать в /srv/archive" \
+        text_has_fixed "$o" ARCHIVE_DENIED
+      component_check "backupsvc не может писать в /etc" \
+        text_has_fixed "$o" ETC_DENIED
+      component_check "backupsvc не может писать в /root" \
+        text_has_fixed "$o" ROOT_DENIED
+      ;;
+    A4.4.7)
+      echo -e "${BLUE}Покомпонентная оценка:${NC}"
+      component_check "каждая строка содержит 64-символьный SHA-256" \
+        manifest_hashes_valid "$o"
+      component_check "пути в manifest являются относительными" \
+        manifest_paths_relative "$o"
+      ;;
+  esac
+  if [ "$A4_COMPONENT_TOTAL" -gt 0 ]; then
+    A4_COMPONENT_MESSAGE="${A4_COMPONENT_PASS}/${A4_COMPONENT_TOTAL} компонентов пройдено"
+    return 0
+  fi
+  return 1
+}
 ok_basic() {
   [ "$2" -eq 0 ] && [ -n "$(tr -d '[:space:]' <<<"$1")" ] &&
     none_re "$1" 'Permission denied|command not found|No such file or directory|syntax error|Connection timed out'
@@ -157,8 +302,12 @@ evaluate_result() {
     A4.2.13) [ "$rc" -eq 0 ] && all "$o" /srv/projects /srv/backups /srv/archive ;;
 
     A4.3.1)
-      [ "$(count_re "$o" 'projectops:x:7440:')" -ge 3 ] &&
-        [ "$(count_re "$o" 'auditors:x:7450:')" -ge 3 ]
+      group_matches "$o" storage-a4 projectops 7440 &&
+        group_matches "$o" storage-a4 auditors 7450 &&
+        group_matches "$o" maint-a4 projectops 7440 &&
+        group_matches "$o" maint-a4 auditors 7450 &&
+        group_matches "$o" sh-operator-a4 projectops 7440 &&
+        group_matches "$o" sh-operator-a4 auditors 7450
       ;;
     A4.3.2)
       [ "$(count_re "$o" 'uid=8441\(olga\)')" -ge 3 ] &&
@@ -220,19 +369,30 @@ evaluate_result() {
       ;;
 
     A4.4.1) all "$o" APP_NAME=cedar-a4 BACKUP_REQUIRED=yes VERSION=1 A4_CRITICAL_DATA ;;
-    A4.4.2) all "$o" a4-backup-svc.sh 'backupsvc@' /srv/backups/svc-a4 manifest.sha256 ;;
-    A4.4.3) [ "$rc" -eq 0 ] && all "$o" ssh-ok backupsvc ;;
-    A4.4.4) [ "$rc" -eq 0 ] && any_re "$o" 'backupsvc' ;;
-    A4.4.5) [ "$rc" -eq 0 ] && all "$o" config data etc manifest.sha256 ;;
-    A4.4.6) all "$o" srv/a4-service/config srv/a4-service/data etc/fstab etc/rsyslog.conf etc/rsyslog.d ;;
-    A4.4.7) [ "$rc" -eq 0 ] && any_re "$o" ': OK' ;;
-    A4.4.8) any_re "$o" 'latest.*svc-a4/[0-9]{8}-[0-9]{6}' ;;
-    A4.4.9|A4.6.11) any_re "$o" 'backup.log' ;;
-    A4.4.10) any_re "$o" 'A4_BACKUP_OK' ;;
-    A4.4.11) all "$o" a4-backup.service ExecStart ;;
-    A4.4.12) all "$o" a4-backup.timer enabled active ;;
-    A4.4.13) any_re "$o" '15min|hourly|OnCalendar|OnUnitActiveSec' ;;
-    A4.4.14) [ "$rc" -eq 0 ] && any_re "$o" 'success|inactive \(dead\)|exited' ;;
+    A4.4.2) [ "$rc" -eq 0 ] && any_re "$o" '(^|[[:space:]])backupsvc([[:space:]]|$)' ;;
+    A4.4.3) all "$o" BACKUP_WRITE_OK PROJECTS_DENIED ARCHIVE_DENIED ETC_DENIED ROOT_DENIED ;;
+    A4.4.4) [ "$rc" -eq 0 ] && any_re "$o" 'a4-backup-svc.sh' && any_re "$o" '^#!|bash|sh' ;;
+    A4.4.5) any_re "$o" '/srv/backups/svc-a4/[0-9]{8}-[0-9]{6}' ;;
+    A4.4.6)
+      all "$o" srv/a4-service/config/app.conf srv/a4-service/data/critical.txt \
+        etc/fstab etc/rsyslog.conf etc/rsyslog.d
+      ;;
+    A4.4.7) manifest_hashes_valid "$o" && manifest_paths_relative "$o" ;;
+    A4.4.8) [ "$rc" -eq 0 ] && any_re "$o" ': OK$' && none_re "$o" ': FAILED$' ;;
+    A4.4.9)
+      any_re "$o" '/srv/backups/svc-a4/[0-9]{8}-[0-9]{6}' &&
+        any_re "$o" 'latest[[:space:]]+->'
+      ;;
+    A4.4.10) [ "$rc" -eq 0 ] && [ -n "$(tr -d '[:space:]' <<<"$o")" ] ;;
+    A4.4.11) any_re "$o" 'A4_BACKUP_OK' ;;
+    A4.4.12) all "$o" a4-backup.service ExecStart && any_re "$o" 'a4-backup-svc.sh|success|exited' ;;
+    A4.4.13)
+      all "$o" enabled active a4-backup.timer &&
+        any_re "$o" '15min|1h|hourly|OnCalendar|OnUnitActiveSec'
+      ;;
+    A4.4.14)
+      awk 'NF && $1 ~ /^[0-9]+$/ { exit !($1>=2) } END { if (NR==0) exit 1 }' <<<"$o"
+      ;;
 
     A4.5.1) all "$o" a4-restore-svc.sh critical.txt latest ;;
     A4.5.2) any_re "$o" 'A4_CRITICAL_DATA' ;;
@@ -334,6 +494,31 @@ EOF
       fi
       echo -e "${CYAN}[INFO]${NC} Парольный вход для backupsvc этим критерием не требуется и не оценивается."
       ;;
+    A4.3.1)
+      echo -e "${BLUE}Подробная проверка свойств:${NC}"
+      while IFS='|' read -r host group gid; do
+        actual="$(sed -n "s|^HOST=${host};GROUP=${group};ACTUAL=||p" <<<"$o" | head -n1)"
+        [ -n "$actual" ] || actual="<MISSING>"
+        if [[ "${actual,,}" == "${group}:x:${gid}:"* ]]; then
+          echo -e "${GREEN}[OK]${NC} ${host}: ${group}, ожидаемый GID=${gid}; фактически ${actual}"
+        else
+          echo -e "${RED}[FAIL]${NC} ${host}: ${group}, ожидаемый GID=${gid}; фактически ${actual}"
+        fi
+      done <<'EOF'
+storage-a4|projectops|7440
+storage-a4|auditors|7450
+maint-a4|projectops|7440
+maint-a4|auditors|7450
+sh-operator-a4|projectops|7440
+sh-operator-a4|auditors|7450
+EOF
+      actual="$(sed -n 's|^HOST=storage-a4;GROUP=backupops;ACTUAL=||p' <<<"$o" | head -n1)"
+      if [[ "${actual,,}" == backupops:x:7460:* ]]; then
+        echo -e "${CYAN}[INFO]${NC} storage-a4: optional backupops найдена, GID=7460."
+      else
+        echo -e "${CYAN}[INFO]${NC} storage-a4: backupops не подтверждена; это не влияет на A4.3.1, если группа не используется решением."
+      fi
+      ;;
   esac
 }
 
@@ -343,12 +528,17 @@ validate_start() {
 }
 
 main() {
+  if grep -Eq 'sudo[[:space:]]+-u' "$A4_CRITERIA_MAP"; then
+    echo "ERROR: обнаружен устаревший a4_criteria_map.tsv с командами sudo -u." >&2
+    echo "Обновите целиком каталоги A4/remote, A4/common и A4/criteria. Build: $A4_BUILD" >&2
+    exit 2
+  fi
   validate_start
-  echo -e "${CYAN}A4 remote evaluator — Storage, Backup, Logs and Recovery${NC}"
+  echo -e "${CYAN}A4 remote evaluator — Storage, Backup, Logs and Recovery (build $A4_BUILD)${NC}"
   echo "Рекомендуемый хост запуска: maint-a4 (10.44.20.20)"
   echo "Отчёты: $A4_REPORT_DIR"
   ssh_precheck
-  local started=0 id sub desc mark runfrom commands expected notes command last_sub=""
+  local started=0 id sub desc mark runfrom commands expected notes command awarded last_sub=""
   while IFS=$'\t' read -r id sub desc mark runfrom commands expected notes; do
     [ "$id" = CriterionID ] && continue
     [ "$id" = "$A4_START_FROM" ] && started=1
@@ -362,11 +552,22 @@ main() {
     command="$(decode_newlines "$commands")"
     cmd_show "$id" "$command"
     run_command "$id" "$command"
-    show_diagnostics "$id" "$A4_LAST_OUT"
     show_output "ExitCode=$A4_LAST_RC (полный вывод показан выше)"
-    if evaluate_result "$id" "$A4_LAST_OUT" "$A4_LAST_RC"; then
+    if evaluate_components "$id" "$A4_LAST_OUT"; then
+      if [ "$A4_COMPONENT_PASS" -eq "$A4_COMPONENT_TOTAL" ]; then
+        pass "$id" "$mark" "$A4_COMPONENT_MESSAGE"
+      elif [ "$A4_COMPONENT_PASS" -gt 0 ]; then
+        awarded="$(awk -v m="$mark" -v p="$A4_COMPONENT_PASS" -v t="$A4_COMPONENT_TOTAL" \
+          'BEGIN { printf "%.3f", m*p/t }')"
+        part "$id" "$mark" "$awarded" "$A4_COMPONENT_MESSAGE"
+      else
+        fail "$id" "$mark" "$A4_COMPONENT_MESSAGE"
+      fi
+    elif evaluate_result "$id" "$A4_LAST_OUT" "$A4_LAST_RC"; then
+      show_diagnostics "$id" "$A4_LAST_OUT"
       pass "$id" "$mark" "фактический вывод соответствует ожидаемому результату"
     else
+      show_diagnostics "$id" "$A4_LAST_OUT"
       fail "$id" "$mark" "ожидаемые свойства не подтверждены: $expected"
     fi
   done < "$A4_CRITERIA_MAP"
