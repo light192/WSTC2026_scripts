@@ -13,7 +13,7 @@ A4_LAST_OUT=""
 A4_COMPONENT_PASS=0
 A4_COMPONENT_TOTAL=0
 A4_COMPONENT_MESSAGE=""
-A4_BUILD="2026-07-24.5"
+A4_BUILD="2026-07-24.7"
 
 usage() {
   cat <<'EOF'
@@ -241,6 +241,26 @@ EOF
       component_check "пути в manifest являются относительными" \
         manifest_paths_relative "$o"
       ;;
+    A4.4.9)
+      echo -e "${BLUE}Покомпонентная оценка:${NC}"
+      component_check "latest является символической ссылкой" \
+        text_has_fixed "$o" LATEST_IS_SYMLINK=PASS
+      component_check "цель latest существует и является каталогом" \
+        text_has_fixed "$o" LATEST_TARGET_EXISTS=PASS
+      component_check "имя цели соответствует YYYYMMDD-HHMMSS" \
+        text_has_fixed "$o" LATEST_TARGET_TIMESTAMP=PASS
+      ;;
+    A4.6.14)
+      echo -e "${BLUE}Покомпонентная оценка:${NC}"
+      for host in sh-router-a4 sz-router-a4 svc-a4 storage-a4 log-a4; do
+        component_check "${host}: rsyslog active после restart" \
+          text_has_fixed "$o" "HOST=${host};RSYSLOG_ACTIVE=PASS"
+      done
+      for host in sh-router-a4 sz-router-a4 svc-a4 storage-a4; do
+        component_check "${host}: restart marker получен на log-a4" \
+          text_has_fixed "$o" "HOST=${host};MARKER_RECEIVED=PASS"
+      done
+      ;;
   esac
   if [ "$A4_COMPONENT_TOTAL" -gt 0 ]; then
     A4_COMPONENT_MESSAGE="${A4_COMPONENT_PASS}/${A4_COMPONENT_TOTAL} компонентов пройдено"
@@ -379,10 +399,7 @@ evaluate_result() {
       ;;
     A4.4.7) manifest_hashes_valid "$o" && manifest_paths_relative "$o" ;;
     A4.4.8) [ "$rc" -eq 0 ] && any_re "$o" ': OK$' && none_re "$o" ': FAILED$' ;;
-    A4.4.9)
-      any_re "$o" '/srv/backups/svc-a4/[0-9]{8}-[0-9]{6}' &&
-        any_re "$o" 'latest[[:space:]]+->'
-      ;;
+    A4.4.9) all "$o" LATEST_IS_SYMLINK=PASS LATEST_TARGET_EXISTS=PASS LATEST_TARGET_TIMESTAMP=PASS ;;
     A4.4.10) [ "$rc" -eq 0 ] && [ -n "$(tr -d '[:space:]' <<<"$o")" ] ;;
     A4.4.11) any_re "$o" 'A4_BACKUP_OK' ;;
     A4.4.12) all "$o" a4-backup.service ExecStart && any_re "$o" 'a4-backup-svc.sh|success|exited' ;;
@@ -415,7 +432,10 @@ evaluate_result() {
     A4.6.10) any_re "$o" 'A4-SZ-DROP' ;;
     A4.6.12) all "$o" /var/log/a4-service rotate 4 compress missingok notifempty create ;;
     A4.6.13) all "$o" /var/log/remote rotate 4 compress missingok notifempty ;;
-    A4.6.14) [ "$rc" -eq 0 ] && [ "$(count_re "$o" 'A4_SYSLOG_RESTART_TEST')" -ge 4 ] ;;
+    A4.6.14)
+      [ "$(count_re "$o" 'RSYSLOG_ACTIVE=PASS')" -eq 5 ] &&
+        [ "$(count_re "$o" 'MARKER_RECEIVED=PASS')" -eq 4 ]
+      ;;
 
     A4.7.1) [ "$(count_re "$o" 'enabled')" -ge 2 ] && [ "$(count_re "$o" 'active')" -ge 2 ] && any_re "$o" 'table' ;;
     A4.7.2) [ "$(count_re "$o" 'hook forward')" -ge 2 ] ;;
