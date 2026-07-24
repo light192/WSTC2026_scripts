@@ -97,6 +97,12 @@ all() { local text="$1" value; shift; for value in "$@"; do grep -Fqi "$value" <
 any_re() { grep -Eiq "$2" <<<"$1"; }
 none_re() { ! grep -Eiq "$2" <<<"$1"; }
 count_re() { grep -Eic "$2" <<<"$1" || true; }
+mount_matches() {
+  local text="$1" target="$2" expected_lv="$3" line
+  line="$(sed -n "s|^MOUNT=${target};RESULT=||p" <<<"$text" | head -n1)"
+  [ -n "$line" ] && [ "$line" != "<NOT-MOUNTED>" ] &&
+    grep -Fqi "$expected_lv" <<<"$line"
+}
 ok_basic() {
   [ "$2" -eq 0 ] && [ -n "$(tr -d '[:space:]' <<<"$1")" ] &&
     none_re "$1" 'Permission denied|command not found|No such file or directory|syntax error|Connection timed out'
@@ -119,7 +125,15 @@ evaluate_result() {
     A4.1.13) all "$o" 10.44.10.1 10.44.10.20 10.44.20.1 10.44.20.20 10.44.30.10 10.44.40.10 10.44.40.20 ;;
     A4.1.14) all "$o" 2001:db8:a4:10::1 2001:db8:a4:10::20 2001:db8:a4:20::1 2001:db8:a4:20::20 2001:db8:a4:30::10 2001:db8:a4:40::10 2001:db8:a4:40::20 ;;
     A4.1.15) all "$o" 198.51.101.10 198.51.101.20 10.44.20.1 10.44.30.1 10.44.40.1 2001:db8:a4:100::10 2001:db8:a4:100::20 2001:db8:a4:20::1 2001:db8:a4:30::1 2001:db8:a4:40::1 ;;
-    A4.1.16) [ "$(count_re "$o" 'log-a4.cedar.a4.local.')" -ge 2 ] && [ "$(count_re "$o" 'storage-a4.cedar.a4.local.')" -ge 3 ] && any_re "$o" 'svc-a4.cedar.a4.local.' ;;
+    A4.1.16)
+      all "$o" \
+        'CNAME=dns;ACTUAL=log-a4.cedar.a4.local.' \
+        'CNAME=log;ACTUAL=log-a4.cedar.a4.local.' \
+        'CNAME=files;ACTUAL=storage-a4.cedar.a4.local.' \
+        'CNAME=backup;ACTUAL=storage-a4.cedar.a4.local.' \
+        'CNAME=storage;ACTUAL=storage-a4.cedar.a4.local.' \
+        'CNAME=svc;ACTUAL=svc-a4.cedar.a4.local.'
+      ;;
     A4.1.17) [ "$(count_re "$o" 'cedar.a4.local.')" -ge 11 ] ;;
     A4.1.18) any_re "$o" 'REFUSED|timed out|no servers could be reached' ;;
     A4.1.19) [ "$(count_re "$o" '10.44.40.10|127.0.0.1')" -ge 7 ] ;;
@@ -130,7 +144,11 @@ evaluate_result() {
     A4.2.4) all "$o" lv_backups vg_a4_storage && any_re "$o" '8(\.0+)?g' ;;
     A4.2.5) all "$o" lv_archive vg_a4_storage && any_re "$o" '2(\.0+)?g' ;;
     A4.2.6) [ "$(count_re "$o" 'TYPE="(ext4|xfs)"')" -ge 3 ] ;;
-    A4.2.7) all "$o" /srv/projects /srv/backups /srv/archive lv_projects lv_backups lv_archive ;;
+    A4.2.7)
+      mount_matches "$o" /srv/projects lv_projects &&
+        mount_matches "$o" /srv/backups lv_backups &&
+        mount_matches "$o" /srv/archive lv_archive
+      ;;
     A4.2.8) [ "$(count_re "$o" '^(UUID|LABEL)=.*[[:space:]]+/srv/(projects|backups|archive)')" -ge 3 ] ;;
     A4.2.9) all "$o" A4_NFS_OK A4_BACKUP_TARGET keep-ok ;;
     A4.2.10) awk 'BEGIN{ok=0} $1+0>=1{ok=1} END{exit !ok}' <<<"$o" ;;
@@ -138,24 +156,68 @@ evaluate_result() {
     A4.2.12) all "$o" vg_a4_storage lsblk pvs vgs lvs findmnt ;;
     A4.2.13) [ "$rc" -eq 0 ] && all "$o" /srv/projects /srv/backups /srv/archive ;;
 
-    A4.3.1) all "$o" projectops 7440 auditors 7450 ;;
-    A4.3.2) all "$o" olga 8441 projectops ;;
-    A4.3.3) all "$o" danil 8442 auditors ;;
-    A4.3.4) all "$o" backupsvc 8490 ;;
-    A4.3.5) all "$o" user::rwx group::rwx group:projectops:rwx group:auditors:r-x other::--- default: ;;
-    A4.3.6) [ "$rc" -eq 0 ] && any_re "$o" 'olga|A4_NFS_OK' ;;
-    A4.3.7) [ "$rc" -ne 0 ] || any_re "$o" 'Permission denied|FAIL|Read-only' ;;
-    A4.3.8) any_re "$o" '/srv/projects.*10.44.10.0/24' && any_re "$o" '/srv/projects.*10.44.20.0/24' && any_re "$o" 'root_squash' ;;
-    A4.3.9) any_re "$o" ':2049' && none_re "$o" ':111|mountd' ;;
-    A4.3.10|A4.3.11) all "$o" /mnt/a4-projects storage-a4 ;;
-    A4.3.12) [ "$rc" -eq 0 ] && all "$o" A4_NFS_OK olga ;;
-    A4.3.13) [ "$rc" -ne 0 ] || any_re "$o" 'Permission denied|Read-only' ;;
-    A4.3.14) all "$o" projects /srv/projects/team && any_re "$o" 'guest ok[[:space:]]*=[[:space:]]*no' ;;
-    A4.3.15) all "$o" olga danil ;;
-    A4.3.16) [ "$rc" -eq 0 ] && any_re "$o" 'olga-smb-ok' ;;
-    A4.3.17) [ "$rc" -ne 0 ] || any_re "$o" 'NT_STATUS_ACCESS_DENIED|Permission denied' ;;
-    A4.3.18) [ "$rc" -eq 0 ] && any_re "$o" 'projects' ;;
-    A4.3.19) [ "$rc" -eq 0 ] && all "$o" /mnt/a4-projects A4_NFS_OK ;;
+    A4.3.1)
+      [ "$(count_re "$o" 'projectops:x:7440:')" -ge 3 ] &&
+        [ "$(count_re "$o" 'auditors:x:7450:')" -ge 3 ]
+      ;;
+    A4.3.2)
+      [ "$(count_re "$o" 'uid=8441\(olga\)')" -ge 3 ] &&
+        [ "$(count_re "$o" 'uid=8442\(danil\)')" -ge 3 ] &&
+        [ "$(count_re "$o" 'projectops')" -ge 3 ] &&
+        [ "$(count_re "$o" 'auditors')" -ge 3 ]
+      ;;
+    A4.3.3)
+      any_re "$o" 'uid=8490\(backupsvc\)' &&
+        any_re "$o" '^GROUPS=.*backupops([[:space:]]|$)|^backupops:x:[0-9]+:.*backupsvc'
+      ;;
+    A4.3.4) [ "$rc" -eq 0 ] && any_re "$o" '/srv/projects/team' ;;
+    A4.3.5)
+      all "$o" 'group:projectops:rwx' 'group:auditors:r-x' 'other::---'
+      ;;
+    A4.3.6)
+      all "$o" 'default:group:projectops:rwx' 'default:group:auditors:r-x'
+      ;;
+    A4.3.7)
+      any_re "$o" '/srv/projects.*10.44.10.0/24' &&
+        any_re "$o" '/srv/projects.*10.44.20.0/24' &&
+        none_re "$o" '0.0.0.0/0|\*\(.*rw'
+      ;;
+    A4.3.8)
+      any_re "$o" ':2049' && any_re "$o" 'vers=4|nfs4'
+      ;;
+    A4.3.9)
+      any_re "$o" '/srv/projects' && none_re "$o" 'no_root_squash'
+      ;;
+    A4.3.10|A4.3.11)
+      [ "$rc" -eq 0 ] && all "$o" /mnt/a4-projects A4_NFS_OK
+      ;;
+    A4.3.12)
+      [ "$rc" -eq 0 ] &&
+        [ "$(count_re "$o" '/mnt/a4-projects')" -ge 4 ]
+      ;;
+    A4.3.13) [ "$rc" -eq 0 ] ;;
+    A4.3.14)
+      [ "$rc" -eq 0 ] &&
+        all "$o" DANIL_WRITE_DENIED DANIL_SH_WRITE_DENIED
+      ;;
+    A4.3.15)
+      all "$o" '[projects]' /srv/projects/team &&
+        any_re "$o" ':445'
+      ;;
+    A4.3.16)
+      any_re "$o" 'NT_STATUS_ACCESS_DENIED|NT_STATUS_LOGON_FAILURE|Anonymous login unsuccessful|Permission denied'
+      ;;
+    A4.3.17)
+      [ "$rc" -eq 0 ] && any_re "$o" 'olga-smb-test.txt'
+      ;;
+    A4.3.18)
+      any_re "$o" 'danil-smb-deny.txt|blocks available|blocks of size' &&
+        any_re "$o" 'NT_STATUS_ACCESS_DENIED|Permission denied'
+      ;;
+    A4.3.19)
+      [ "$rc" -eq 0 ] && any_re "$o" ':445' &&
+        any_re "$o" 'projects|blocks available|blocks of size'
+      ;;
 
     A4.4.1) all "$o" APP_NAME=cedar-a4 BACKUP_REQUIRED=yes VERSION=1 A4_CRITICAL_DATA ;;
     A4.4.2) all "$o" a4-backup-svc.sh 'backupsvc@' /srv/backups/svc-a4 manifest.sha256 ;;
@@ -220,6 +282,61 @@ evaluate_result() {
   esac
 }
 
+show_diagnostics() {
+  local id="$1" o="$2" name expected actual
+  case "$id" in
+    A4.1.16)
+      echo -e "${BLUE}Подробная проверка свойств:${NC}"
+      while IFS='|' read -r name expected; do
+        actual="$(sed -n "s/^CNAME=${name};ACTUAL=//p" <<<"$o" | head -n1)"
+        [ -n "$actual" ] || actual="<EMPTY>"
+        if [ "${actual,,}" = "${expected,,}" ]; then
+          echo -e "${GREEN}[OK]${NC} ${name}.${A4_DOMAIN} -> ${actual}"
+        else
+          echo -e "${RED}[FAIL]${NC} ${name}.${A4_DOMAIN}: ожидается ${expected}; получено ${actual}"
+        fi
+      done <<'EOF'
+dns|log-a4.cedar.a4.local.
+log|log-a4.cedar.a4.local.
+files|storage-a4.cedar.a4.local.
+backup|storage-a4.cedar.a4.local.
+storage|storage-a4.cedar.a4.local.
+svc|svc-a4.cedar.a4.local.
+EOF
+      ;;
+    A4.2.7)
+      echo -e "${BLUE}Подробная проверка свойств:${NC}"
+      while IFS='|' read -r target expected_lv; do
+        actual="$(sed -n "s|^MOUNT=${target};RESULT=||p" <<<"$o" | head -n1)"
+        [ -n "$actual" ] || actual="<NOT-MOUNTED>"
+        if [ "$actual" != "<NOT-MOUNTED>" ] && grep -Fqi "$expected_lv" <<<"$actual"; then
+          echo -e "${GREEN}[OK]${NC} ${target}: ожидаемый LV=${expected_lv}; фактически ${actual}"
+        else
+          echo -e "${RED}[FAIL]${NC} ${target}: ожидаемый LV=${expected_lv}; фактически ${actual}"
+        fi
+      done <<'EOF'
+/srv/projects|lv_projects
+/srv/backups|lv_backups
+/srv/archive|lv_archive
+EOF
+      ;;
+    A4.3.3)
+      echo -e "${BLUE}Подробная проверка свойств:${NC}"
+      if any_re "$o" 'uid=8490\(backupsvc\)'; then
+        echo -e "${GREEN}[OK]${NC} backupsvc существует, UID=8490."
+      else
+        echo -e "${RED}[FAIL]${NC} ожидается backupsvc с UID=8490."
+      fi
+      if any_re "$o" '^GROUPS=.*backupops([[:space:]]|$)|^backupops:x:[0-9]+:.*backupsvc'; then
+        echo -e "${GREEN}[OK]${NC} backupsvc связан с группой backupops."
+      else
+        echo -e "${RED}[FAIL]${NC} backupsvc не состоит в backupops. Фактические группы: $(sed -n 's/^GROUPS=//p' <<<"$o" | head -n1)"
+      fi
+      echo -e "${CYAN}[INFO]${NC} Парольный вход для backupsvc этим критерием не требуется и не оценивается."
+      ;;
+  esac
+}
+
 validate_start() {
   awk -F'\t' -v id="$A4_START_FROM" 'NR>1 && $1==id{f=1} END{exit !f}' "$A4_CRITERIA_MAP" ||
     { echo "Aspect $A4_START_FROM not found" >&2; exit 2; }
@@ -245,6 +362,7 @@ main() {
     command="$(decode_newlines "$commands")"
     cmd_show "$id" "$command"
     run_command "$id" "$command"
+    show_diagnostics "$id" "$A4_LAST_OUT"
     show_output "ExitCode=$A4_LAST_RC (полный вывод показан выше)"
     if evaluate_result "$id" "$A4_LAST_OUT" "$A4_LAST_RC"; then
       pass "$id" "$mark" "фактический вывод соответствует ожидаемому результату"

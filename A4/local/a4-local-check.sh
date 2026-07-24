@@ -33,7 +33,7 @@ case "$HN" in
     capture A4.7.1 0.25 nftables "systemctl is-enabled nftables; systemctl is-active nftables; nft list ruleset"
     ;;
   storage-a4)
-    capture A4.2.2 0.38 LVM "lsblk; pvs; vgs; lvs; blkid; findmnt /srv/projects /srv/backups /srv/archive; cat /etc/fstab"
+    capture A4.2.2 0.38 LVM "lsblk; pvs; vgs; lvs; blkid; for t in /srv/projects /srv/backups /srv/archive; do findmnt -rn --target \"\$t\" -o TARGET,SOURCE,FSTYPE,OPTIONS || true; done; cat /etc/fstab"
     capture A4.3.5 0.25 ACL "getfacl -p /srv/projects/team; exportfs -v; testparm -s"
     capture A4.4.5 0.35 backups "find /srv/backups/svc-a4 -maxdepth 3 -type f -o -type l | sort | tail -80"
     ;;
