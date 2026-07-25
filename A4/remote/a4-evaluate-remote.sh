@@ -13,7 +13,7 @@ A4_LAST_OUT=""
 A4_COMPONENT_PASS=0
 A4_COMPONENT_TOTAL=0
 A4_COMPONENT_MESSAGE=""
-A4_BUILD="2026-07-24.7"
+A4_BUILD="2026-07-25.1"
 
 usage() {
   cat <<'EOF'
@@ -421,15 +421,16 @@ evaluate_result() {
     A4.5.8) [ "$rc" -eq 0 ] && all "$o" A4_CRITICAL_DATA manifest.sha256 ;;
 
     A4.6.1) any_re "$o" 'active' && any_re "$o" ':514.*LISTEN|LISTEN.*:514' ;;
-    A4.6.2) [ "$(count_re "$o" '@@10.44.40.10|omfwd.*10.44.40.10')" -ge 4 ] ;;
-    A4.6.3) [ "$rc" -eq 0 ] && any_re "$o" 'A4_SYSLOG_TEST' ;;
-    A4.6.4) all "$o" A4-SH-DROP A4-SZ-DROP ;;
-    A4.6.5) any_re "$o" '/var/log/remote|%HOSTNAME%' ;;
+    A4.6.2) any_re "$o" 'A4_SH_SYSLOG_TEST' ;;
+    A4.6.3) any_re "$o" 'A4_SZ_SYSLOG_TEST' ;;
+    A4.6.4) any_re "$o" 'A4_SVC_SYSLOG_TEST' ;;
+    A4.6.5) any_re "$o" 'A4_STORAGE_SYSLOG_TEST' ;;
     A4.6.6) all "$o" sh-router-a4.log sz-router-a4.log svc-a4.log storage-a4.log ;;
     A4.6.7) any_re "$o" 'A4_BACKUP_OK' ;;
     A4.6.8) any_re "$o" 'A4_RESTORE_OK' ;;
     A4.6.9) any_re "$o" 'A4-SH-DROP' ;;
     A4.6.10) any_re "$o" 'A4-SZ-DROP' ;;
+    A4.6.11) [ "$rc" -eq 0 ] && any_re "$o" 'backup.log' ;;
     A4.6.12) all "$o" /var/log/a4-service rotate 4 compress missingok notifempty create ;;
     A4.6.13) all "$o" /var/log/remote rotate 4 compress missingok notifempty ;;
     A4.6.14)
