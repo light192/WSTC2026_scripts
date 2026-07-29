@@ -22,7 +22,7 @@ sys.path.insert(0, str(HERE.parent / "C3"))
 import c3_check_ios as c3
 
 base = c3.base
-C4_CHECKER_VERSION = "2026-07-29.33"
+C4_CHECKER_VERSION = "2026-07-29.34"
 for stream in (sys.stdout, sys.stderr):
     if hasattr(stream, "reconfigure"):
         stream.reconfigure(encoding="utf-8", errors="replace")
@@ -617,6 +617,28 @@ class Scorer(c3.Scorer):
         decaps=sum(int(value) for value in re.findall(
             r"#pkts decaps:\s*(\d+)",text,re.I))
         return encaps,decaps
+
+    @staticmethod
+    def ipsec_peer_snapshot(text, peer):
+        """Return counters/state only for the IPsec SA belonging to one peer."""
+        blocks=re.split(r"(?=^\s*protected vrf:)",text,flags=re.I|re.M)
+        peer_re=re.escape(peer)
+        selected=[
+            block for block in blocks
+            if re.search(rf"\bcurrent_peer\s+{peer_re}\b",block,re.I)
+            or re.search(rf"\bremote crypto endpt\.:\s*{peer_re}\b",block,re.I)
+        ]
+        joined="\n".join(selected)
+        return {
+            "found":bool(selected),
+            "active":bool(re.search(r"Status:\s*ACTIVE(?:\(ACTIVE\))?",joined,re.I)),
+            "encaps":sum(int(value) for value in re.findall(
+                r"#pkts encaps:\s*(\d+)",joined,re.I)),
+            "decaps":sum(int(value) for value in re.findall(
+                r"#pkts decaps:\s*(\d+)",joined,re.I)),
+            "spis":tuple(sorted(set(re.findall(
+                r"\bspi:\s*(0x[0-9A-F]+)",joined,re.I)))),
+        }
 
     @staticmethod
     def peer_session_counters(text, peer):
@@ -1393,9 +1415,10 @@ class Scorer(c3.Scorer):
         if aid=="D11":
             before={}
             after={}
+            direct_peer={"BR1":NBMA["BR2"],"BR2":NBMA["BR1"]}
             for dev in ("BR1","BR2"):
-                before[dev]=self.ipsec_packet_counters(
-                    self.cmd(dev,"show crypto ipsec sa"))
+                before[dev]=self.ipsec_peer_snapshot(
+                    self.cmd(dev,"show crypto ipsec sa"),direct_peer[dev])
 
             pc3_ok=pc4_ok=False
             try:
@@ -1409,14 +1432,33 @@ class Scorer(c3.Scorer):
             # Clear command cache so the second show is actually executed.
             self.cache.clear()
             for dev in ("BR1","BR2"):
-                after[dev]=self.ipsec_packet_counters(
-                    self.cmd(dev,"show crypto ipsec sa"))
+                after[dev]=self.ipsec_peer_snapshot(
+                    self.cmd(dev,"show crypto ipsec sa"),direct_peer[dev])
 
             growth={}
+            growth_reason={}
             for dev in ("BR1","BR2"):
-                growth[dev]=(after[dev][0]>before[dev][0]
-                             and after[dev][1]>before[dev][1])
-            encrypted=(pc3_ok or pc4_ok) and all(growth.values())
+                old=before[dev]
+                new=after[dev]
+                counters_grew=(new["encaps"]>old["encaps"]
+                               and new["decaps"]>old["decaps"])
+                rekeyed=(old["spis"]!=new["spis"]
+                         and new["active"]
+                         and new["encaps"]>0
+                         and new["decaps"]>0)
+                growth[dev]=(new["found"] and new["active"]
+                             and (counters_grew or rekeyed))
+                if counters_grew:
+                    growth_reason[dev]="counters increased"
+                elif rekeyed:
+                    growth_reason[dev]="SA rekey/reset; new active SA has traffic"
+                elif not new["found"]:
+                    growth_reason[dev]="direct peer SA not found"
+                elif not new["active"]:
+                    growth_reason[dev]="direct peer SA is not active"
+                else:
+                    growth_reason[dev]="no counter growth"
+            encrypted=pc3_ok and pc4_ok and all(growth.values())
 
             # A CLI show cannot prove that protocol 47 is absent on the wire.
             # Keep this half explicitly unconfirmed until Expert capture.
@@ -1424,10 +1466,14 @@ class Scorer(c3.Scorer):
             details=(
                 f"BR1 sourced ping={'PASS' if pc3_ok else 'FAIL'}; "
                 f"BR2 sourced ping={'PASS' if pc4_ok else 'FAIL'}; "
-                f"BR1 counters {before['BR1']}→{after['BR1']} "
-                f"({'PASS' if growth['BR1'] else 'FAIL'}); "
-                f"BR2 counters {before['BR2']}→{after['BR2']} "
-                f"({'PASS' if growth['BR2'] else 'FAIL'}); "
+                f"BR1 direct peer {direct_peer['BR1']} counters "
+                f"({before['BR1']['encaps']},{before['BR1']['decaps']})→"
+                f"({after['BR1']['encaps']},{after['BR1']['decaps']}) "
+                f"({'PASS' if growth['BR1'] else 'FAIL'}: {growth_reason['BR1']}); "
+                f"BR2 direct peer {direct_peer['BR2']} counters "
+                f"({before['BR2']['encaps']},{before['BR2']['decaps']})→"
+                f"({after['BR2']['encaps']},{after['BR2']['decaps']}) "
+                f"({'PASS' if growth['BR2'] else 'FAIL'}: {growth_reason['BR2']}); "
                 "WAN capture clear GRE=REQUIRES EXPERT CONFIRMATION"
             )
             return self.ratio(
@@ -2411,13 +2457,74 @@ class Scorer(c3.Scorer):
                 print(f"{color}[{status}] {label}{base.NC}")
         return self.ratio(aid,tests,labels=labels)
 
+    def ratio(self, aid, tests, details="", labels=None):
+        """Оценивает подпроверки и подробно расшифровывает каждый PART."""
+        values = [bool(value) for value in tests]
+        source_labels = list(labels or [])
+        full_labels = []
+        for index in range(len(values)):
+            if index < len(source_labels) and str(source_labels[index]).strip():
+                full_labels.append(str(source_labels[index]).strip())
+            else:
+                full_labels.append(f"Подпроверка {index + 1}")
+
+        passed = sum(values)
+        total = len(values)
+        if 0 < passed < total:
+            breakdown = [
+                "Расшифровка частичного результата:",
+                *[
+                    f"[{'PASS' if value else 'FAIL'}] {index + 1}/{total}: {label}"
+                    for index, (value, label) in enumerate(zip(values, full_labels))
+                ],
+                (
+                    f"Итого подтверждено: {passed}/{total}; "
+                    f"не подтверждено: {total - passed}/{total}."
+                ),
+            ]
+            breakdown_text = "\n".join(breakdown)
+            details_text = "" if details is None else str(details).strip()
+            details = (
+                f"{details_text}\n{breakdown_text}"
+                if details_text
+                else breakdown_text
+            )
+
+        return super().ratio(
+            aid,
+            values,
+            details=details,
+            labels=full_labels,
+        )
+
     def print_result(self,result):
         color={"PASS":base.GREEN,"PART":base.PURPLE,"FAIL":base.RED,"SKIP":base.YELLOW}[result.status]
         fraction=f" ({result.passed}/{result.total})" if result.total else ""
         print(f"\n{base.CYAN}Результат аспекта:{base.NC}")
         print(f"{color}[{result.status}] {result.aspect.id} {result.score:.3f}/{result.aspect.mark:.3f}"
               f"{fraction} — {result.aspect.title}{base.NC}")
-        if result.details: print("  "+result.details)
+        details_text = str(result.details or "").strip()
+        if (
+            result.status == "PART"
+            and "Расшифровка частичного результата:" not in details_text
+        ):
+            total = int(result.total or 0)
+            passed = int(result.passed or 0)
+            fallback = "\n".join(
+                [
+                    "Расшифровка частичного результата:",
+                    f"[PASS] Подтверждено подпроверок: {passed}/{total}.",
+                    f"[FAIL] Не подтверждено подпроверок: {total - passed}/{total}.",
+                ]
+            )
+            details_text = (
+                f"{details_text}\n{fallback}"
+                if details_text
+                else fallback
+            )
+        if details_text:
+            for line in details_text.splitlines():
+                print("  " + line)
 
     def report(self):
         totals=defaultdict(float); maximums=defaultdict(float)
