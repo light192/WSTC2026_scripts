@@ -1,0 +1,16 @@
+---
+- name: Быстрая подготовка чистой базовой конфигурации D1 для Linux
+  hosts: linux
+  gather_facts: false
+  tasks:
+    - name: Убедиться, что каталог базовой конфигурации существует
+      ansible.builtin.file:
+        path: /opt/d1-baseline
+        state: directory
+        mode: '0755'
+    - name: Записать маркер Ansible
+      ansible.builtin.copy:
+        dest: /opt/d1-baseline/ansible-marker.txt
+        content: "D1_ANSIBLE_BASELINE_OK
+"
+        mode: '0644'

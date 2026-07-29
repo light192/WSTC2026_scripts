@@ -1,0 +1,21 @@
+{
+  "module": "B4",
+  "version": "2026-07-28.27",
+  "structure_source": "B3",
+  "criteria_source": "B4_marking_scheme_by_device_25_final.xlsx",
+  "task_source": "B4_Competitor_Task_EN_styled.pdf",
+  "criteria_count": 106,
+  "total_points": 25.0,
+  "grouping": "device",
+  "entry_points": [
+    "SHA-RTR01",
+    "BJ-RTR01",
+    "SHA-DC01",
+    "BJ-DC02",
+    "SHA-FS01",
+    "BJ-SRV01",
+    "SHA-CL01",
+    "BJ-CL01",
+    "INET-CL01"
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "HQ-GW1": {
+    "Gi0/0": "Internet Gi0/3",
+    "Gi0/1": "MPLS Gi0/0",
+    "Gi0/2": "HQ-GW2 Gi0/2",
+    "Gi0/3": "HQ-SW Gi0/0 trunk",
+    "Gi0/4": "HQ-SW-D Gi0/1"
+  },
+  "HQ-GW2": {
+    "Gi0/0": "Internet Gi0/4",
+    "Gi0/1": "MPLS Gi0/1",
+    "Gi0/2": "HQ-GW1 Gi0/2",
+    "Gi0/3": "HQ-SW-D Gi0/0",
+    "Gi0/4": "HQ-SW Gi0/1 trunk"
+  },
+  "HQ-SW": {
+    "Gi0/0": "HQ-GW1 Gi0/3 trunk",
+    "Gi0/1": "HQ-GW2 Gi0/4 trunk",
+    "Gi0/2": "HQ-LNX01 e0",
+    "Gi0/3": "HQ-FILE01 e0",
+    "Gi1/0": "HQ-AD01 e0",
+    "Gi1/1": "HQ-WS01 e0"
+  },
+  "HQ-SW-D": {
+    "Gi0/0": "HQ-GW2 Gi0/3",
+    "Gi0/1": "HQ-GW1 Gi0/4",
+    "Gi0/2": "HQ-R Gi0/0",
+    "Gi0/3": "HQ-R Gi0/1"
+  },
+  "HQ-R": {
+    "Gi0/0": "HQ-SW-D Gi0/2",
+    "Gi0/1": "HQ-SW-D Gi0/3"
+  },
+  "DC-GW": {
+    "Gi0/0": "Internet Gi0/2",
+    "Gi0/1": "MPLS Gi0/2",
+    "Gi0/2": "Switch Gi0/0 trunk"
+  },
+  "Switch": {
+    "Gi0/0": "DC-GW Gi0/2 trunk",
+    "Gi0/1": "DC-LNX01 e0",
+    "Gi0/2": "DC-LNX02 e0",
+    "Gi0/3": "DC-CL01 e0",
+    "Gi1/0": "DC-Win01 e0",
+    "Gi1/1": "DC-SVC01 e0"
+  },
+  "Internet": {
+    "Gi0/0": "DC1 Gi0/0",
+    "Gi0/1": "DC2 Gi0/1",
+    "Gi0/2": "DC-GW Gi0/0",
+    "Gi0/3": "HQ-GW1 Gi0/0",
+    "Gi0/4": "HQ-GW2 Gi0/0"
+  },
+  "MPLS": {
+    "Gi0/0": "HQ-GW1 Gi0/1",
+    "Gi0/1": "HQ-GW2 Gi0/1",
+    "Gi0/2": "DC-GW Gi0/1"
+  },
+  "DC1": {
+    "Gi0/0": "Internet Gi0/0",
+    "Gi0/1": "DC2 Gi0/0",
+    "Lo0": "Cloud service loopback"
+  },
+  "DC2": {
+    "Gi0/0": "DC1 Gi0/1",
+    "Gi0/1": "Internet Gi0/1",
+    "Lo0": "Cloud backup loopback"
+  }
+}

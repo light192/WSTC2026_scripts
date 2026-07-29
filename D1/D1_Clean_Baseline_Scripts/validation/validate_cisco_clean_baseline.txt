@@ -1,0 +1,25 @@
+# Выполните эти команды на устройствах Cisco после применения чистой базовой конфигурации.
+
+# На всех маршрутизаторах и устройствах уровня 3:
+show ip interface brief
+show ip route ospf
+show ip ospf neighbor
+show cdp neighbors
+ping 10.19.20.10
+ping 10.19.110.11
+ping 10.19.210.1
+
+# Шлюзы HQ:
+show standby brief
+show interfaces description
+show ip ospf interface brief
+
+# HQ-SW и коммутатор DC:
+show vlan brief
+show interfaces trunk
+show spanning-tree root
+
+# Проверка предпочтения маршрутов через WAN провайдера:
+traceroute 10.19.110.11 source 10.19.20.2
+traceroute 10.19.110.11 source 10.19.20.3
+traceroute 10.19.210.1 source 10.19.20.2

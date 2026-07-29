@@ -1,0 +1,176 @@
+{
+  "package": "D1_Clean_Baseline_Scripts",
+  "created_at": "2026-07-20T16:31:59",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 3165,
+      "sha256": "17502438e815aa82b291d5df7bfa211ee8c0ada65cd16c4bd803c51896678ddc"
+    },
+    {
+      "path": "ansible/d1_linux_clean_baseline.yml",
+      "bytes": 575,
+      "sha256": "e404bc375f816ddc032b504cddf395577bfcab9960656a146c7efe37bbbae76c"
+    },
+    {
+      "path": "ansible/inventory.ini",
+      "bytes": 265,
+      "sha256": "0d1abb803929c26f750afda30ebcb8bf6ebc2ee31d17bca919ee7fa59bfc796e"
+    },
+    {
+      "path": "cisco/DC-GW_clean_baseline.ios",
+      "bytes": 1666,
+      "sha256": "1e2013e228a8a262e0cd742b203c0496264b0e8d5b0828ee8fbaeff664829f4a"
+    },
+    {
+      "path": "cisco/DC1_clean_baseline.ios",
+      "bytes": 1256,
+      "sha256": "545c2123cdd184e1b251a515f59d9abd043db46dd4492f6902942f6d470e65c2"
+    },
+    {
+      "path": "cisco/DC2_clean_baseline.ios",
+      "bytes": 1255,
+      "sha256": "acc79fa80532fd990c03ba64b18be99bff4636109e761dc7d8c1124b8183c27b"
+    },
+    {
+      "path": "cisco/HQ-GW1_clean_baseline.ios",
+      "bytes": 2107,
+      "sha256": "aa76c3fd0da26885e7b37fcfef3577ade7c094de117b44be00497a7469025007"
+    },
+    {
+      "path": "cisco/HQ-GW2_clean_baseline.ios",
+      "bytes": 2108,
+      "sha256": "cb9d9e01e19c0538f5c7669029b78a9d75abcc04124cb9cc93fea14abcba3901"
+    },
+    {
+      "path": "cisco/HQ-R_clean_baseline.ios",
+      "bytes": 1245,
+      "sha256": "3f2a7e3046642a3b43650cf2fbd45af56e2bb8638db4c07dbc4aaa8fefd33b72"
+    },
+    {
+      "path": "cisco/HQ-SW-D_clean_baseline.ios",
+      "bytes": 1782,
+      "sha256": "63f598da64c059ec5aea4082b520140cf79e5fa4fa58b0d829874cd98d9d9776"
+    },
+    {
+      "path": "cisco/HQ-SW_clean_baseline.ios",
+      "bytes": 1802,
+      "sha256": "f2e6ef4fb17584d1af4615951812c2c67b937b1c33baf2058de2f97dc78f3eaa"
+    },
+    {
+      "path": "cisco/Internet_clean_baseline.ios",
+      "bytes": 1595,
+      "sha256": "a1acdc266de7e46109cc8a78e4ee61fe1705e7382a428fe6dedf135b3896d007"
+    },
+    {
+      "path": "cisco/MPLS_clean_baseline.ios",
+      "bytes": 1605,
+      "sha256": "88b1dcf732b46f22d0d747fb8a3027553309ef386ce37d9f3bef7abb52925f52"
+    },
+    {
+      "path": "cisco/Switch_clean_baseline.ios",
+      "bytes": 1758,
+      "sha256": "19a05ce4d639bc668b69e9eef47e347f33a03af004792970ca1748e131ef12af"
+    },
+    {
+      "path": "docs/IMAGE_SPECIFIC_NOTES.md",
+      "bytes": 1739,
+      "sha256": "d0fb314feb1b02afd06ec07d479b8b88063bb810a472b95d4fb135b87f36615a"
+    },
+    {
+      "path": "docs/RUN_ORDER.md",
+      "bytes": 2482,
+      "sha256": "2fe120f46f7b18a03d1d3a3dd383325aa1d760b4d95ca468b9ccc7505286ec39"
+    },
+    {
+      "path": "docs/WHAT_TO_SNAPSHOT.md",
+      "bytes": 966,
+      "sha256": "9dda6f9a842b0a878b6184edacd080d641cd0451acd620b8fcc34cab0d334e1c"
+    },
+    {
+      "path": "inventory/D1_addressing_table.csv",
+      "bytes": 3401,
+      "sha256": "05f96f0b148f98cf05b4a958885fc16d9a5883a372699cb5e28513f0e412d63e"
+    },
+    {
+      "path": "inventory/interface_map.json",
+      "bytes": 1523,
+      "sha256": "fd51139e8dcf53efe1597d254d19a4d2506735e234d29a9d0540c5b7e9f48a49"
+    },
+    {
+      "path": "linux/00_d1_linux_common_prepare.sh",
+      "bytes": 2940,
+      "sha256": "dccff65fad4e261dcf9ddd874e5eed41f1331a373978040da314995eeb392005"
+    },
+    {
+      "path": "linux/10_DC-LNX01_prepare_web_portal.sh",
+      "bytes": 667,
+      "sha256": "e18cf4adf2e3599134ced15e3770212430e5326b6413ebf9aab43509ee01c8fa"
+    },
+    {
+      "path": "linux/20_DC-LNX02_prepare_dns_backup.sh",
+      "bytes": 1254,
+      "sha256": "ff8e1f4318a966958fa6bab4f79a030c536f4e35aab67ba625f2610deba91702"
+    },
+    {
+      "path": "linux/30_DC-SVC01_prepare_monitoring_syslog.sh",
+      "bytes": 1036,
+      "sha256": "d4a44bf1d660ed41019671baddc8e391e3dcde3c3f883fe774cce51f454f60de"
+    },
+    {
+      "path": "linux/40_HQ-LNX01_prepare_backup_monitor_agent.sh",
+      "bytes": 545,
+      "sha256": "420ebe22f1e348f0fb960a44219fdcc18864d040c8ce653036124360b74c8c4c"
+    },
+    {
+      "path": "linux/50_DC-CL01_prepare_client.sh",
+      "bytes": 398,
+      "sha256": "18f96f1853a1f6d6f8327a6678de552f8bf3f12227c9535e02070998bff59c1f"
+    },
+    {
+      "path": "service_samples/dns_records_reference.md",
+      "bytes": 868,
+      "sha256": "cf6adc65a80605544cbe2793bd4bc0af2985265c77fb59d66111ee32b1d6740e"
+    },
+    {
+      "path": "validation/validate_cisco_clean_baseline.txt",
+      "bytes": 808,
+      "sha256": "f3240cc170f82f974fdfab101f2df55fe2a1f13588d8db20220dd3a87ffbcb12"
+    },
+    {
+      "path": "validation/validate_linux_clean_baseline.sh",
+      "bytes": 667,
+      "sha256": "d491fa62c1bf7f8df50a3f08ebd4eb961e7d1faeac4e3abfb9b06639e04df476"
+    },
+    {
+      "path": "validation/validate_windows_clean_baseline.ps1",
+      "bytes": 626,
+      "sha256": "55b1aca8b3c879871d1fd0949f351d554daf75101e4ad832dbe8e828fdb51069"
+    },
+    {
+      "path": "windows/00_D1_common_windows_prepare.ps1",
+      "bytes": 1976,
+      "sha256": "e1c9dbc47db7c13314ae30e0f17947488626d4ee75e72028b9c3418ba2e968fe"
+    },
+    {
+      "path": "windows/10_HQ-AD01_prepare_ad_dns_dhcp.ps1",
+      "bytes": 4251,
+      "sha256": "8ddc03dec3f1745ed4ca363bdcf876c28da98ae18cc4580fd3c17668df03e269"
+    },
+    {
+      "path": "windows/20_HQ-FILE01_prepare_file_iis.ps1",
+      "bytes": 2010,
+      "sha256": "ecf3a827ac27edf46d1076cfdaf194e5410dccb110a966afbe2ab7db99c11c4f"
+    },
+    {
+      "path": "windows/30_HQ-WS01_prepare_client.ps1",
+      "bytes": 544,
+      "sha256": "f407e7629c528628c139f0a08ad122cc2be89da6a99d132c6650f1bd7701ded9"
+    },
+    {
+      "path": "windows/40_DC-Win01_prepare_app.ps1",
+      "bytes": 624,
+      "sha256": "dcd0b332a878340c6a57c6ca7f1d9ef4bc8b7df9d54a2f0e6a8f4b7d78538495"
+    }
+  ]
+}

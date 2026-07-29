@@ -1,0 +1,77 @@
+!
+! Чистая базовая конфигурация D1. Примените к устройству, указанному в строке hostname.
+! ВАЖНО: перед вставкой сверьте имена интерфейсов с топологией PNETLab.
+no ip domain lookup
+service timestamps debug datetime msec
+service timestamps log datetime msec
+ip cef
+username expert privilege 15 secret Skill39@D1
+line con 0
+ logging synchronous
+ exec-timeout 0 0
+line vty 0 4
+ login local
+ transport input ssh telnet
+ip domain-name d1.skills
+crypto key generate rsa modulus 2048
+!
+
+hostname Switch
+!
+spanning-tree mode rapid-pvst
+vlan 99
+ name DC_MGMT
+vlan 110
+ name DC_SERVERS
+vlan 120
+ name DC_CLIENTS
+!
+interface GigabitEthernet0/0
+ description TRUNK-TO-DC-GW-Gi0/2
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+ switchport trunk allowed vlan 99,110,120
+ no shutdown
+!
+interface GigabitEthernet0/1
+ description TO-DC-LNX01-e0
+ switchport mode access
+ switchport access vlan 110
+ spanning-tree portfast
+ no shutdown
+!
+interface GigabitEthernet0/2
+ description TO-DC-LNX02-e0
+ switchport mode access
+ switchport access vlan 110
+ spanning-tree portfast
+ no shutdown
+!
+interface GigabitEthernet0/3
+ description TO-DC-CL01-e0
+ switchport mode access
+ switchport access vlan 120
+ spanning-tree portfast
+ no shutdown
+!
+interface GigabitEthernet1/0
+ description TO-DC-Win01-e0
+ switchport mode access
+ switchport access vlan 110
+ spanning-tree portfast
+ no shutdown
+!
+interface GigabitEthernet1/1
+ description TO-DC-SVC01-e0
+ switchport mode access
+ switchport access vlan 110
+ spanning-tree portfast
+ no shutdown
+!
+interface Vlan99
+ ip address 10.19.199.11 255.255.255.0
+ no shutdown
+!
+ip default-gateway 10.19.199.1
+end
+write memory

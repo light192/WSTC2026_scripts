@@ -1,0 +1,51 @@
+Device,Interface,IP/Mask,Connected to,Purpose
+HQ-GW1,Gi0/0,172.19.0.2/30,Internet Gi0/3,Internet provider link
+HQ-GW1,Gi0/1,10.255.19.2/30,MPLS Gi0/0,MPLS provider WAN link
+HQ-GW1,Gi0/2,10.19.255.1/30,HQ-GW2 Gi0/2,HQ gateway interconnect
+HQ-GW1,Gi0/3.10,10.19.10.2/24; HSRP 10.19.10.1,HQ-SW Gi0/0 trunk,HQ users VLAN 10
+HQ-GW1,Gi0/3.20,10.19.20.2/24; HSRP 10.19.20.1,HQ-SW Gi0/0 trunk,HQ servers VLAN 20
+HQ-GW1,Gi0/3.99,10.19.99.2/24; HSRP 10.19.99.1,HQ-SW Gi0/0 trunk,HQ management VLAN 99
+HQ-GW1,Gi0/4,10.19.40.9/30,HQ-SW-D Gi0/1,L3 link to HQ distribution switch
+HQ-GW2,Gi0/0,172.19.0.6/30,Internet Gi0/4,Internet provider link
+HQ-GW2,Gi0/1,10.255.19.6/30,MPLS Gi0/1,MPLS provider WAN link
+HQ-GW2,Gi0/2,10.19.255.2/30,HQ-GW1 Gi0/2,HQ gateway interconnect
+HQ-GW2,Gi0/3,10.19.40.13/30,HQ-SW-D Gi0/0,L3 link to HQ distribution switch
+HQ-GW2,Gi0/4.10,10.19.10.3/24; HSRP 10.19.10.1,HQ-SW Gi0/1 trunk,HQ users VLAN 10
+HQ-GW2,Gi0/4.20,10.19.20.3/24; HSRP 10.19.20.1,HQ-SW Gi0/1 trunk,HQ servers VLAN 20
+HQ-GW2,Gi0/4.99,10.19.99.3/24; HSRP 10.19.99.1,HQ-SW Gi0/1 trunk,HQ management VLAN 99
+HQ-SW,Vlan99,10.19.99.11/24,HQ-GW1/HQ-GW2,Switch management
+HQ-SW-D,Gi0/0,10.19.40.14/30,HQ-GW2 Gi0/3,Routed uplink
+HQ-SW-D,Gi0/1,10.19.40.10/30,HQ-GW1 Gi0/4,Routed uplink
+HQ-SW-D,Gi0/2,10.19.40.1/30,HQ-R Gi0/0,Routed test link
+HQ-SW-D,Gi0/3,10.19.40.5/30,HQ-R Gi0/1,Routed test link
+HQ-R,Gi0/0,10.19.40.2/30,HQ-SW-D Gi0/2,Routed test link
+HQ-R,Gi0/1,10.19.40.6/30,HQ-SW-D Gi0/3,Routed test link
+DC-GW,Gi0/0,172.19.0.10/30,Internet Gi0/2,Internet provider link
+DC-GW,Gi0/1,10.255.19.10/30,MPLS Gi0/2,MPLS provider WAN link
+DC-GW,Gi0/2.110,10.19.110.1/24,Switch Gi0/0 trunk,DC servers VLAN 110
+DC-GW,Gi0/2.120,10.19.120.1/24,Switch Gi0/0 trunk,DC clients VLAN 120
+DC-GW,Gi0/2.99,10.19.199.1/24,Switch Gi0/0 trunk,DC management VLAN 99
+Switch,Vlan99,10.19.199.11/24,DC-GW,DC switch management
+Internet,Gi0/0,172.19.0.13/30,DC1 Gi0/0,Cloud DC1 link
+Internet,Gi0/1,172.19.0.17/30,DC2 Gi0/1,Cloud DC2 link
+Internet,Gi0/2,172.19.0.9/30,DC-GW Gi0/0,DC Internet link
+Internet,Gi0/3,172.19.0.1/30,HQ-GW1 Gi0/0,HQ1 Internet link
+Internet,Gi0/4,172.19.0.5/30,HQ-GW2 Gi0/0,HQ2 Internet link
+MPLS,Gi0/0,10.255.19.1/30,HQ-GW1 Gi0/1,HQ1 MPLS link
+MPLS,Gi0/1,10.255.19.5/30,HQ-GW2 Gi0/1,HQ2 MPLS link
+MPLS,Gi0/2,10.255.19.9/30,DC-GW Gi0/1,DC MPLS link
+DC1,Gi0/0,172.19.0.14/30,Internet Gi0/0,Cloud Internet uplink
+DC1,Gi0/1,10.19.250.1/30,DC2 Gi0/0,Cloud interconnect
+DC1,Lo0,10.19.210.1/24,local,Cloud service loopback
+DC2,Gi0/1,172.19.0.18/30,Internet Gi0/1,Cloud Internet uplink
+DC2,Gi0/0,10.19.250.2/30,DC1 Gi0/1,Cloud interconnect
+DC2,Lo0,10.19.220.1/24,local,Cloud backup loopback
+HQ-WS01,e0,10.19.10.11/24 gw 10.19.10.1,HQ-SW Gi1/1,Windows 11 client
+HQ-AD01,e0,10.19.20.10/24 gw 10.19.20.1,HQ-SW Gi1/0,"AD DS, DNS, DHCP"
+HQ-FILE01,e0,10.19.20.20/24 gw 10.19.20.1,HQ-SW Gi0/3,File/IIS server
+HQ-LNX01,e0,10.19.20.30/24 gw 10.19.20.1,HQ-SW Gi0/2,Debian monitoring/backup agent
+DC-LNX01,e0,10.19.110.11/24 gw 10.19.110.1,Switch Gi0/1,Debian web portal
+DC-LNX02,e0,10.19.110.12/24 gw 10.19.110.1,Switch Gi0/2,Debian DNS/backup service
+DC-Win01,e0,10.19.110.21/24 gw 10.19.110.1,Switch Gi1/0,Windows application server
+DC-SVC01,e0,10.19.110.31/24 gw 10.19.110.1,Switch Gi1/1,Other services/syslog/monitoring
+DC-CL01,e0,10.19.120.11/24 gw 10.19.120.1,Switch Gi0/3,Debian client
