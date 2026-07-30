@@ -1,0 +1,16 @@
+! Apply on HQ-GW2 for D1 Day 2 matched faults
+configure terminal
+!
+! T06: backup gateway is up but its WAN OSPF adjacencies are disabled.
+router ospf 39
+ passive-interface GigabitEthernet0/0
+ passive-interface GigabitEthernet0/1
+exit
+interface GigabitEthernet0/0
+ ip ospf cost 500
+exit
+interface GigabitEthernet0/1
+ ip ospf cost 500
+exit
+end
+write memory

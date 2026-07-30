@@ -1,0 +1,12 @@
+! Apply on HQ-GW1 for D1 Day 1 matched faults
+configure terminal
+!
+! G06: make Internet path preferred over MPLS.
+interface GigabitEthernet0/0
+ ip ospf cost 10
+exit
+interface GigabitEthernet0/1
+ ip ospf cost 250
+exit
+end
+write memory

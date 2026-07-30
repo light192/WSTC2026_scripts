@@ -1,0 +1,17 @@
+! Apply on HQ-R for D1 Day 1 matched faults
+configure terminal
+!
+! G07: HQ-AD01 cannot SSH to HQ-R while physical links remain up.
+no ip access-list standard D1-G07-MGMT-BLOCK
+ip access-list standard D1-G07-MGMT-BLOCK
+ remark G07 - block HQ-AD01 management source only
+ deny host 10.19.20.10
+ permit any
+exit
+line vty 0 4
+ access-class D1-G07-MGMT-BLOCK in
+ transport input ssh telnet
+ login local
+exit
+end
+write memory

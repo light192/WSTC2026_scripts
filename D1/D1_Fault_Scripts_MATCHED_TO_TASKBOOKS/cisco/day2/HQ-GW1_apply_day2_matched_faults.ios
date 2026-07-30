@@ -1,0 +1,21 @@
+! Apply on HQ-GW1 for D1 Day 2 matched faults
+configure terminal
+!
+! T06: HQ-GW1 stays preferred for HQ users when its Internet uplink is disabled.
+interface GigabitEthernet0/3.10
+ standby 10 priority 130
+ standby 10 preempt
+ no standby 10 track GigabitEthernet0/0
+exit
+interface GigabitEthernet0/3.20
+ standby 20 priority 130
+ standby 20 preempt
+ no standby 20 track GigabitEthernet0/0
+exit
+interface GigabitEthernet0/3.99
+ standby 99 priority 130
+ standby 99 preempt
+ no standby 99 track GigabitEthernet0/0
+exit
+end
+write memory

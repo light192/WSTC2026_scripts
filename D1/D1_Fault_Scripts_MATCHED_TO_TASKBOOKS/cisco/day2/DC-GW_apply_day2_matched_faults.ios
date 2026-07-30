@@ -1,0 +1,26 @@
+! Apply on DC-GW for D1 Day 2 matched faults
+configure terminal
+!
+! T04: DC-CL01 resolves names but cannot reach Cloud service.
+ip access-list extended D1-T04-DCCL-TO-CLOUD-BLOCK
+ remark T04 - block DC-CL01 to Cloud only; DNS is not blocked
+ deny ip host 10.19.120.11 10.19.210.0 0.0.0.255
+ deny ip host 10.19.120.11 10.19.220.0 0.0.0.255
+ permit ip any any
+exit
+interface GigabitEthernet0/0
+ ip access-group D1-T04-DCCL-TO-CLOUD-BLOCK out
+exit
+!
+! T09: Monitoring from HQ shows DC-SVC01 down, local DC check passes.
+ip access-list extended D1-T09-HQMON-TO-DCSVC-BLOCK
+ remark T09 - block monitoring source HQ-LNX01 to DC-SVC01 service port only
+ deny tcp host 10.19.20.30 host 10.19.110.31 eq 8080
+ deny tcp host 10.19.20.30 host 10.19.110.31 eq 80
+ permit ip any any
+exit
+interface GigabitEthernet0/2.110
+ ip access-group D1-T09-HQMON-TO-DCSVC-BLOCK out
+exit
+end
+write memory

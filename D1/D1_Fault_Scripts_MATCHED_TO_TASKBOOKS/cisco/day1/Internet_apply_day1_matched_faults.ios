@@ -1,0 +1,22 @@
+! Apply on Internet router for D1 Day 1 matched faults
+configure terminal
+!
+! G05: Cloud DC is reachable from DC but not from HQ.
+ip access-list extended D1-G05-HQ-TO-CLOUD-BLOCK
+ remark G05 - block HQ source networks to cloud loopbacks only
+ deny ip 10.19.10.0 0.0.0.255 10.19.210.0 0.0.0.255
+ deny ip 10.19.20.0 0.0.0.255 10.19.210.0 0.0.0.255
+ deny ip 10.19.99.0 0.0.0.255 10.19.210.0 0.0.0.255
+ deny ip 10.19.10.0 0.0.0.255 10.19.220.0 0.0.0.255
+ deny ip 10.19.20.0 0.0.0.255 10.19.220.0 0.0.0.255
+ deny ip 10.19.99.0 0.0.0.255 10.19.220.0 0.0.0.255
+ permit ip any any
+exit
+interface GigabitEthernet0/3
+ ip access-group D1-G05-HQ-TO-CLOUD-BLOCK in
+exit
+interface GigabitEthernet0/4
+ ip access-group D1-G05-HQ-TO-CLOUD-BLOCK in
+exit
+end
+write memory

@@ -1,0 +1,22 @@
+! Apply on DC-GW for D1 Day 1 matched faults
+configure terminal
+!
+! G01: HQ-WS01 cannot open DC-LNX01 web portal, while local gateway ping still works.
+ip access-list extended D1-G01-HQWS-TO-DC-PORTAL
+ remark G01 - block only HQ-WS01 HTTP to DC-LNX01
+ deny tcp host 10.19.10.11 host 10.19.110.11 eq 80
+ permit ip any any
+exit
+interface GigabitEthernet0/2.110
+ ip access-group D1-G01-HQWS-TO-DC-PORTAL out
+exit
+!
+! G06: make Internet path preferred over MPLS toward internal DC traffic.
+interface GigabitEthernet0/0
+ ip ospf cost 10
+exit
+interface GigabitEthernet0/1
+ ip ospf cost 250
+exit
+end
+write memory
