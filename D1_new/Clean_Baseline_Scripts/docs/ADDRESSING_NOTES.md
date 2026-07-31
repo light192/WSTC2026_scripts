@@ -39,9 +39,13 @@ schema says otherwise:
   map marks the HQ-GW↔HQ-SW/HQ-SW-D uplinks as "trunk" but never states VLAN
   IDs. 10/20 were chosen to mirror the subnet numbering (`10.19.10.0/24`,
   `10.19.20.0/24`) — this is an arbitrary but harmless implementation detail.
-- **HSRP interface tracking on HQ-GW1/HQ-GW2.** Added `standby track Gi0/0
-  decrement 20` on both gateways so that losing an Internet uplink actually
-  demotes HSRP priority and lets the peer preempt. The previous baseline had
+- **HSRP interface tracking on HQ-GW1/HQ-GW2.** Modern IOS's `standby track`
+  only accepts an enhanced object-tracking object number, not an interface
+  name directly. Each gateway defines `track 1 interface GigabitEthernet0/0
+  line-protocol` (global config) and both HSRP groups reference it with
+  `standby <group> track 1 decrement 20`, so losing the Internet uplink's
+  line-protocol demotes HSRP priority by 20 and lets the peer preempt. The
+  previous baseline had
   no tracking at all, which made ticket T06 ("failover via HQ-GW2 does not
   work") logically hollow — there was no working "clean" failover to break.
 - **HQ-SW-D ↔ HQ-R segment.** The PDF marks the HQ-GW1→HQ-SW-D and
