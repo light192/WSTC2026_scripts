@@ -1,0 +1,62 @@
+!
+! D1 clean baseline. Apply to the device named in the hostname line.
+! IMPORTANT: verify interface names against the PNETLab topology before pasting.
+no ip domain lookup
+service timestamps debug datetime msec
+service timestamps log datetime msec
+ip cef
+username expert privilege 15 secret Skill39@D1
+line con 0
+ logging synchronous
+ exec-timeout 0 0
+line vty 0 4
+ login local
+ transport input ssh telnet
+ip domain-name skill39.d1
+crypto key generate rsa modulus 2048
+!
+
+hostname Internet
+!
+interface GigabitEthernet0/0
+ description TO-DC1-Gi0/0
+ ip address 10.201.0.1 255.255.255.252
+ ip ospf cost 100
+ no shutdown
+!
+interface GigabitEthernet0/1
+ description TO-DC2-Gi0/1
+ ip address 10.201.0.5 255.255.255.252
+ ip ospf cost 100
+ no shutdown
+!
+interface GigabitEthernet0/2
+ description TO-DC-GW-Gi0/0
+ ip address 10.202.0.1 255.255.255.252
+ ip ospf cost 100
+ no shutdown
+!
+interface GigabitEthernet0/3
+ description TO-HQ-GW1-Gi0/0
+ ip address 10.202.0.5 255.255.255.252
+ ip ospf cost 100
+ no shutdown
+!
+interface GigabitEthernet0/4
+ description TO-HQ-GW2-Gi0/0
+ ip address 10.202.0.9 255.255.255.252
+ ip ospf cost 100
+ no shutdown
+!
+router ospf 39
+ router-id 10.10.10.10
+ passive-interface default
+ no passive-interface GigabitEthernet0/0
+ no passive-interface GigabitEthernet0/1
+ no passive-interface GigabitEthernet0/2
+ no passive-interface GigabitEthernet0/3
+ no passive-interface GigabitEthernet0/4
+ network 0.0.0.0 255.255.255.255 area 0
+!
+end
+write memory

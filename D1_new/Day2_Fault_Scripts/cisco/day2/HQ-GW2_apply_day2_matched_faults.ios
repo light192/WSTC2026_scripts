@@ -1,0 +1,17 @@
+! Apply on HQ-GW2 for D1 Day 2 matched faults (PDF-matched addressing)
+configure terminal
+!
+! T06: the backup gateway is up but its WAN OSPF adjacencies are disabled, so
+! even if HSRP failed over, HQ-GW2 would still have no route to DC.
+router ospf 39
+ passive-interface GigabitEthernet0/0
+ passive-interface GigabitEthernet0/1
+exit
+interface GigabitEthernet0/0
+ ip ospf cost 500
+exit
+interface GigabitEthernet0/1
+ ip ospf cost 500
+exit
+end
+write memory

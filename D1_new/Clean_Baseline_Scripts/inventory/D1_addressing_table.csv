@@ -1,0 +1,57 @@
+Device,Interface,IP/Mask,Connected to,Purpose
+Internet,Gi0/0,10.201.0.1/30,DC1 Gi0/0,Cloud DC1 Internet uplink
+Internet,Gi0/1,10.201.0.5/30,DC2 Gi0/1,Cloud DC2 Internet uplink
+Internet,Gi0/2,10.202.0.1/30,DC-GW Gi0/0,Internet path from DC
+Internet,Gi0/3,10.202.0.5/30,HQ-GW1 Gi0/0,HQ Internet path 1
+Internet,Gi0/4,10.202.0.9/30,HQ-GW2 Gi0/0,HQ Internet path 2
+MPLS,Gi0/2,10.203.0.1/30,DC-GW Gi0/1,MPLS path from DC
+MPLS,Gi0/0,10.203.0.5/30,HQ-GW1 Gi0/1,HQ MPLS path 1
+MPLS,Gi0/1,10.203.0.9/30,HQ-GW2 Gi0/1,HQ MPLS path 2
+DC1,Gi0/0,10.201.0.2/30,Internet Gi0/0,Cloud DC1 Internet uplink
+DC1,Gi0/1,10.201.0.9/30,DC2 Gi0/0,Internal Cloud DC link
+DC1,Lo0,10.201.1.1/32,local,"Cloud service loopback (dc1.cloud.skill39.d1) - HTTP:80 via ip http server"
+DC2,Gi0/1,10.201.0.6/30,Internet Gi0/1,Cloud DC2 Internet uplink
+DC2,Gi0/0,10.201.0.10/30,DC1 Gi0/1,Internal Cloud DC link
+DC2,Lo0,10.201.2.1/32,local,"Cloud backup loopback (dc2.cloud.skill39.d1) - SSH:22 via router mgmt"
+DC-GW,Gi0/0,10.202.0.2/30,Internet Gi0/2,Internet path from DC
+DC-GW,Gi0/1,10.203.0.2/30,MPLS Gi0/2,MPLS path from DC
+DC-GW,Gi0/2,10.21.10.1/24,Switch Gi0/0,Uplink to the DC server network (flat, no VLANs)
+Switch,Gi0/0,(L2 access VLAN1),DC-GW Gi0/2,Uplink to DC-GW
+Switch,Gi0/1,(L2 access VLAN1),DC-LNX01 e0,Access to Linux server 1
+Switch,Gi0/2,(L2 access VLAN1),DC-LNX02 e0,Access to Linux server 2
+Switch,Gi0/3,(L2 access VLAN1),DC-CL01 e0,Access to the Debian client
+Switch,Gi1/0,(L2 access VLAN1),DC-Win01 e0,Access to the Windows Server
+Switch,Gi1/1,(L2 access VLAN1),DC-SVC01 e0,Access to the service host
+HQ-GW1,Gi0/0,10.202.0.6/30,Internet Gi0/3,HQ Internet path 1
+HQ-GW1,Gi0/1,10.203.0.6/30,MPLS Gi0/0,HQ MPLS path 1
+HQ-GW1,Gi0/2,10.19.255.1/30,HQ-GW2 Gi0/2,HQ inter-gateway link
+HQ-GW1,Gi0/3.10,10.19.10.2/24; HSRP 10.19.10.1,HQ-SW Gi0/0 trunk,HQ users VLAN 10 (priority 110, track Gi0/0)
+HQ-GW1,Gi0/3.20,10.19.20.2/24; HSRP 10.19.20.1,HQ-SW Gi0/0 trunk,HQ servers VLAN 20 (priority 110, track Gi0/0)
+HQ-GW1,Gi0/4,trunk (no host VLANs active),HQ-SW-D Gi0/1,Uplink to HQ distribution switch 1
+HQ-GW2,Gi0/0,10.202.0.10/30,Internet Gi0/4,HQ Internet path 2
+HQ-GW2,Gi0/1,10.203.0.10/30,MPLS Gi0/1,HQ MPLS path 2
+HQ-GW2,Gi0/2,10.19.255.2/30,HQ-GW1 Gi0/2,HQ inter-gateway link
+HQ-GW2,Gi0/4.10,10.19.10.3/24; HSRP 10.19.10.1,HQ-SW Gi0/1 trunk,HQ users VLAN 10 (priority 100, track Gi0/0)
+HQ-GW2,Gi0/4.20,10.19.20.3/24; HSRP 10.19.20.1,HQ-SW Gi0/1 trunk,HQ servers VLAN 20 (priority 100, track Gi0/0)
+HQ-GW2,Gi0/3,trunk (no host VLANs active),HQ-SW-D Gi0/0,Uplink to HQ distribution switch 2
+HQ-SW,Gi0/0,(trunk VLAN10/20),HQ-GW1 Gi0/3,Uplink to HQ gateway 1
+HQ-SW,Gi0/1,(trunk VLAN10/20),HQ-GW2 Gi0/4,Uplink to HQ gateway 2
+HQ-SW,Gi1/1,(access VLAN10),HQ-WS01 e0,Windows 11 client
+HQ-SW,Gi1/0,(access VLAN20),HQ-AD01 e0,AD/DNS server
+HQ-SW,Gi0/3,(access VLAN20),HQ-FILE01 e0,File server
+HQ-SW,Gi0/2,(access VLAN20),HQ-LNX01 e0,Linux server
+HQ-SW-D,Gi0/1,(trunk - no host VLANs active),HQ-GW1 Gi0/4,Uplink to HQ gateway 1
+HQ-SW-D,Gi0/0,(trunk - no host VLANs active),HQ-GW2 Gi0/3,Uplink to HQ gateway 2
+HQ-SW-D,Gi0/3,10.19.30.1/30,HQ-R Gi0/1,Internal routed link 1
+HQ-SW-D,Gi0/2,10.19.30.5/30,HQ-R Gi0/0,Internal routed link 2
+HQ-R,Gi0/1,10.19.30.2/30,HQ-SW-D Gi0/3,Internal routed link 1
+HQ-R,Gi0/0,10.19.30.6/30,HQ-SW-D Gi0/2,Internal routed link 2
+HQ-WS01,e0,10.19.10.10/24 gw 10.19.10.1,HQ-SW Gi1/1,Windows 11 client
+HQ-AD01,e0,10.19.20.10/24 gw 10.19.20.1,HQ-SW Gi1/0,"AD DS, DNS, NTP"
+HQ-FILE01,e0,10.19.20.20/24 gw 10.19.20.1,HQ-SW Gi0/3,SMB file service
+HQ-LNX01,e0,10.19.20.30/24 gw 10.19.20.1,HQ-SW Gi0/2,Linux web/SSH/syslog client
+DC-LNX01,e0,10.21.10.10/24 gw 10.21.10.1,Switch Gi0/1,Intranet web service
+DC-LNX02,e0,10.21.10.20/24 gw 10.21.10.1,Switch Gi0/2,DNS/utility service
+DC-CL01,e0,10.21.10.30/24 gw 10.21.10.1,Switch Gi0/3,DC test client
+DC-Win01,e0,10.21.10.40/24 gw 10.21.10.1,Switch Gi1/0,Windows service host
+DC-SVC01,e0,10.21.10.50/24 gw 10.21.10.1,Switch Gi1/1,Service Desk / monitoring / app

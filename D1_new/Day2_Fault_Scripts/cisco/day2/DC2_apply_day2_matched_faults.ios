@@ -1,0 +1,17 @@
+! Apply on DC2 for D1 Day 2 matched faults (PDF-matched addressing)
+configure terminal
+!
+! T08: DC-LNX01 backup job to Cloud DC fails; local DC connectivity remains healthy.
+ip access-list extended D1-T08-DC-BACKUP-BLOCK
+ remark T08 - block backup traffic from DC-LNX01 to the cloud backup loopback only
+ deny tcp host 10.21.10.10 host 10.201.2.1 eq 22
+ permit ip any any
+exit
+interface GigabitEthernet0/0
+ ip access-group D1-T08-DC-BACKUP-BLOCK in
+exit
+interface GigabitEthernet0/1
+ ip access-group D1-T08-DC-BACKUP-BLOCK in
+exit
+end
+write memory

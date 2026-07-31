@@ -1,0 +1,15 @@
+! Apply on HQ-GW1 for D1 Day 2 matched faults (PDF-matched addressing)
+configure terminal
+!
+! T06: HQ-GW1 stays HSRP-preferred for HQ users even after its Internet uplink
+! (Gi0/0) goes down, because tracking is removed and priority is raised.
+interface GigabitEthernet0/3.10
+ no standby 10 track GigabitEthernet0/0
+ standby 10 priority 130
+exit
+interface GigabitEthernet0/3.20
+ no standby 20 track GigabitEthernet0/0
+ standby 20 priority 130
+exit
+end
+write memory

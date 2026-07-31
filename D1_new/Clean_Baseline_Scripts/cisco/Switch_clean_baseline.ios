@@ -1,0 +1,58 @@
+!
+! D1 clean baseline. Apply to the device named in the hostname line.
+! IMPORTANT: verify interface names against the PNETLab topology before pasting.
+! DC access switch - flat network, no VLAN segmentation per the taskbook topology.
+no ip domain lookup
+service timestamps debug datetime msec
+service timestamps log datetime msec
+username expert privilege 15 secret Skill39@D1
+line con 0
+ logging synchronous
+ exec-timeout 0 0
+line vty 0 4
+ login local
+ transport input ssh telnet
+ip domain-name skill39.d1
+crypto key generate rsa modulus 2048
+!
+
+hostname Switch
+!
+interface GigabitEthernet0/0
+ description TO-DC-GW-Gi0/2
+ switchport mode access
+ switchport access vlan 1
+ no shutdown
+!
+interface GigabitEthernet0/1
+ description TO-DC-LNX01-e0
+ switchport mode access
+ switchport access vlan 1
+ no shutdown
+!
+interface GigabitEthernet0/2
+ description TO-DC-LNX02-e0
+ switchport mode access
+ switchport access vlan 1
+ no shutdown
+!
+interface GigabitEthernet0/3
+ description TO-DC-CL01-e0
+ switchport mode access
+ switchport access vlan 1
+ no shutdown
+!
+interface GigabitEthernet1/0
+ description TO-DC-Win01-e0
+ switchport mode access
+ switchport access vlan 1
+ no shutdown
+!
+interface GigabitEthernet1/1
+ description TO-DC-SVC01-e0
+ switchport mode access
+ switchport access vlan 1
+ no shutdown
+!
+end
+write memory

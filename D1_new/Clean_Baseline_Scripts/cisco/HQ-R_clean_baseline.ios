@@ -1,0 +1,43 @@
+!
+! D1 clean baseline. Apply to the device named in the hostname line.
+! IMPORTANT: verify interface names against the PNETLab topology before pasting.
+! Internal routed test device, dual-homed to HQ-SW-D only (per the taskbook's
+! "Network device roles" table). No Day 2 ticket currently targets HQ-R.
+no ip domain lookup
+service timestamps debug datetime msec
+service timestamps log datetime msec
+ip cef
+username expert privilege 15 secret Skill39@D1
+line con 0
+ logging synchronous
+ exec-timeout 0 0
+line vty 0 4
+ login local
+ transport input ssh telnet
+ip domain-name skill39.d1
+crypto key generate rsa modulus 2048
+!
+
+hostname HQ-R
+!
+interface GigabitEthernet0/0
+ description TO-HQ-SW-D-Gi0/2
+ ip address 10.19.30.6 255.255.255.252
+ ip ospf cost 10
+ no shutdown
+!
+interface GigabitEthernet0/1
+ description TO-HQ-SW-D-Gi0/3
+ ip address 10.19.30.2 255.255.255.252
+ ip ospf cost 10
+ no shutdown
+!
+router ospf 39
+ router-id 40.40.40.14
+ passive-interface default
+ no passive-interface GigabitEthernet0/0
+ no passive-interface GigabitEthernet0/1
+ network 0.0.0.0 255.255.255.255 area 0
+!
+end
+write memory

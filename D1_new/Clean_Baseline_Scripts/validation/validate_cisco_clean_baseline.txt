@@ -1,0 +1,26 @@
+# Run these commands on the Cisco devices after applying the clean baseline.
+
+# On all routers and L3 devices:
+show ip interface brief
+show ip route ospf
+show ip ospf neighbor
+show cdp neighbors
+ping 10.19.20.10
+ping 10.21.10.10
+ping 10.201.1.1
+ping 10.201.2.1
+
+# HQ gateways:
+show standby brief
+show interfaces description
+show ip ospf interface brief
+
+# HQ-SW and the DC switch:
+show vlan brief
+show interfaces trunk
+show spanning-tree root
+
+# Confirm WAN path preference:
+traceroute 10.21.10.10 source 10.19.20.2
+traceroute 10.21.10.10 source 10.19.20.3
+traceroute 10.201.1.1 source 10.19.20.2
