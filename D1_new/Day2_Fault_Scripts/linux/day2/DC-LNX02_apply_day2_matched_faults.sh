@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-set -euo pipefail
+if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
+set -eu
+set -o pipefail 2>/dev/null || true
 # T10: DC web works locally, HQ DNS works locally, but cross-site DNS
 # recursion is unstable.
 # Fault: DC-LNX02's allow-recursion is restricted to the DC network only,
 # excluding HQ (10.19.0.0/16), so recursive queries reaching DC-LNX02 from
 # HQ networks are refused while DC-local recursion keeps working.
 
-if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+if [ "${EUID:-$(id -u)}" -ne 0 ]; then
   echo "Run as root" >&2
   exit 1
 fi
 
-if [[ -f /etc/bind/named.conf.options ]]; then
+if [ -f /etc/bind/named.conf.options ]; then
   cp -a /etc/bind/named.conf.options /etc/bind/named.conf.options.before-D1-T10 || true
 fi
 cat >/etc/bind/named.conf.options <<'EOF'

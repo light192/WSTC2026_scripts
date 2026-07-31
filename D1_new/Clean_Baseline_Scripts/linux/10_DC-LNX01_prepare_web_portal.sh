@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-set -euo pipefail
+if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
+set -eu
+set -o pipefail 2>/dev/null || true
 # D1 clean baseline: DC-LNX01 intranet web service (PDF role: "intranet web service").
 apt-get update || true
 apt-get install -y nginx curl || true

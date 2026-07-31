@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-set -euo pipefail
+if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
+set -eu
+set -o pipefail 2>/dev/null || true
 # D1 clean baseline: DC-SVC01 Service Desk / monitoring / app (PDF role: "Other services").
 apt-get update || true
 apt-get install -y rsyslog nginx netcat-openbsd jq curl || true
@@ -72,7 +74,9 @@ systemctl enable --now nginx
 
 cat >/opt/d1-healthcheck.sh <<'EOF'
 #!/usr/bin/env bash
-set -euo pipefail
+if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
+set -eu
+set -o pipefail 2>/dev/null || true
 printf '{"host":"DC-SVC01","nginx":"%s","rsyslog":"%s","backend":"%s"}\n' "$(systemctl is-active nginx)" "$(systemctl is-active rsyslog)" "$(systemctl is-active d1svc-backend)"
 EOF
 chmod +x /opt/d1-healthcheck.sh

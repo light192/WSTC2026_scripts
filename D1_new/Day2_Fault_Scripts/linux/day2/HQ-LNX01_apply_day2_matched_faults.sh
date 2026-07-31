@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-set -euo pipefail
+if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
+set -eu
+set -o pipefail 2>/dev/null || true
 # T05: DC-LNX02 cannot SSH to HQ-LNX01; ping succeeds.
 # The rule is saved via netfilter-persistent so it survives a VM reboot
 # (iptables-persistent is installed by 00_d1_linux_common_prepare.sh).
 
-if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+if [ "${EUID:-$(id -u)}" -ne 0 ]; then
   echo "Run as root" >&2
   exit 1
 fi

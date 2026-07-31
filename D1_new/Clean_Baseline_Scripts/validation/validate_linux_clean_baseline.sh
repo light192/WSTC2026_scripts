@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
+if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
 set -u
-set -o pipefail
+set -o pipefail 2>/dev/null || true
 
 echo '=== D1 clean-baseline check (Linux) ==='
 hostnamectl || hostname

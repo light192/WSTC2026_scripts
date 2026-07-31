@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# Re-exec under bash if launched with `sh script.sh` (dash/ash don't know
+# `set -o pipefail`, which this script otherwise uses).
+if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
+set -eu
+# Some minimal/older bash builds don't support pipefail either; degrade
+# gracefully instead of aborting on `set -o pipefail`.
+set -o pipefail 2>/dev/null || true
 
 # Common D1 clean-baseline prep for Linux nodes.
 # Usage: sudo ./00_d1_linux_common_prepare.sh <NODE_NAME>
@@ -8,7 +14,7 @@ set -euo pipefail
 # suffix skill39.d1 is used for every host (see docs/ADDRESSING_NOTES.md).
 
 HOSTNAME_ARG="${1:-}"
-if [[ -z "$HOSTNAME_ARG" ]]; then
+if [ -z "$HOSTNAME_ARG" ]; then
   echo "Usage: $0 <NODE_NAME>" >&2
   exit 2
 fi
@@ -23,16 +29,19 @@ case "$HOSTNAME_ARG" in
 esac
 
 IFACE="${D1_IFACE:-}"
-if [[ -z "$IFACE" ]]; then
+if [ -z "$IFACE" ]; then
   IFACE=$(ip -o link show | awk -F': ' '$2 !~ /lo/ {print $2; exit}')
 fi
 
 echo "$HOSTNAME_ARG" > /etc/hostname
 hostnamectl set-hostname "$HOSTNAME_ARG" || hostname "$HOSTNAME_ARG"
 
+# Portable lowercase (avoids bash 4+ only ${VAR,,}, unsupported on some minimal builds).
+HOSTNAME_LOWER=$(printf '%s' "$HOSTNAME_ARG" | tr '[:upper:]' '[:lower:]')
+
 cat >/etc/hosts <<EOF
 127.0.0.1 localhost
-${IP4%/*} ${HOSTNAME_ARG,,}.skill39.d1 $HOSTNAME_ARG
+${IP4%/*} ${HOSTNAME_LOWER}.skill39.d1 $HOSTNAME_ARG
 EOF
 
 if command -v nmcli >/dev/null 2>&1 && nmcli -t -f NAME,DEVICE con show --active | grep -q ":$IFACE"; then

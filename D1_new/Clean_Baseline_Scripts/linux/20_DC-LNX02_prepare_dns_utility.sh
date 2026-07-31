@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-set -euo pipefail
+if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
+set -eu
+set -o pipefail 2>/dev/null || true
 # D1 clean baseline: DC-LNX02 DNS/utility service (PDF role: "DNS/utility service").
 # DC-LNX02 is the local resolver for DC hosts. It forwards everything (including the
 # skill39.d1 zone) to the authoritative DNS on HQ-AD01 and caches the answers, so both
