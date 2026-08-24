@@ -1,6 +1,8 @@
 # Run these commands on the Cisco devices after applying the clean baseline.
+# Each section names the exact device(s) it applies to.
 
-# On all routers and L3 devices:
+# Routers/L3 devices - run on ALL of:
+#   Internet, MPLS, DC1, DC2, DC-GW, HQ-GW1, HQ-GW2, HQ-SW-D, HQ-R
 show ip interface brief
 show ip route ospf
 show ip ospf neighbor
@@ -10,17 +12,20 @@ ping 10.21.10.10
 ping 10.201.1.1
 ping 10.201.2.1
 
-# HQ gateways:
+# HQ gateways only - run on: HQ-GW1, HQ-GW2
 show standby brief
 show interfaces description
 show ip ospf interface brief
 
-# HQ-SW and the DC switch:
+# L2 access switches only - run on: HQ-SW, Switch (the DC access switch)
 show vlan brief
 show interfaces trunk
 show spanning-tree root
 
-# Confirm WAN path preference:
+# WAN path preference - run on HQ-GW1 (both traceroutes below; its own
+# VLAN20 SVI is 10.19.20.2) and HQ-GW2 (its own VLAN20 SVI is 10.19.20.3):
+# On HQ-GW1:
 traceroute 10.21.10.10 source 10.19.20.2
-traceroute 10.21.10.10 source 10.19.20.3
 traceroute 10.201.1.1 source 10.19.20.2
+# On HQ-GW2:
+traceroute 10.21.10.10 source 10.19.20.3

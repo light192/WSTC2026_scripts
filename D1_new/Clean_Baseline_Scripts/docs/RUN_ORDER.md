@@ -51,11 +51,20 @@ Then the remaining Windows nodes:
 
 ## 3. Debian nodes
 
-Run on each Debian node as root:
+If you deliver these scripts to the VM as a mounted **read-only** ISO
+(`mount /dev/cdrom /mnt` or similar), don't run them with `./script.sh` or
+`bash script.sh` directly - if the copy on the ISO ever picked up Windows
+line endings (CRLF) during authoring, bash on Debian fails with a `syntax
+error near unexpected token` and there is no way to fix it in place on a
+read-only medium. Instead, always stream the file through `tr -d '\r'`
+first - this works identically whether the file is clean or not, and never
+needs write access to the mounted file:
 
 ```bash
-./00_d1_linux_common_prepare.sh DC-LNX01
-./10_DC-LNX01_prepare_web_portal.sh
+D1=/mnt/Clean_Baseline_Scripts/linux   # adjust to your actual mount point
+
+tr -d '\r' <"$D1/00_d1_linux_common_prepare.sh" | sudo bash -s -- DC-LNX01
+tr -d '\r' <"$D1/10_DC-LNX01_prepare_web_portal.sh" | sudo bash -s --
 ```
 
 Use the script matching each node's name/role:
@@ -66,13 +75,57 @@ Use the script matching each node's name/role:
 - `DC-CL01` → DC test client;
 - `HQ-LNX01` → web/SSH/syslog client.
 
+Full command set for all five Debian nodes:
+
+```bash
+D1=/mnt/Clean_Baseline_Scripts/linux
+
+tr -d '\r' <"$D1/00_d1_linux_common_prepare.sh" | sudo bash -s -- DC-LNX01
+tr -d '\r' <"$D1/10_DC-LNX01_prepare_web_portal.sh" | sudo bash -s --
+
+tr -d '\r' <"$D1/00_d1_linux_common_prepare.sh" | sudo bash -s -- DC-LNX02
+tr -d '\r' <"$D1/20_DC-LNX02_prepare_dns_utility.sh" | sudo bash -s --
+
+tr -d '\r' <"$D1/00_d1_linux_common_prepare.sh" | sudo bash -s -- DC-SVC01
+tr -d '\r' <"$D1/30_DC-SVC01_prepare_servicedesk.sh" | sudo bash -s --
+
+tr -d '\r' <"$D1/00_d1_linux_common_prepare.sh" | sudo bash -s -- DC-CL01
+tr -d '\r' <"$D1/50_DC-CL01_prepare_client.sh" | sudo bash -s --
+
+tr -d '\r' <"$D1/00_d1_linux_common_prepare.sh" | sudo bash -s -- HQ-LNX01
+tr -d '\r' <"$D1/40_HQ-LNX01_prepare_web_ssh_syslog.sh" | sudo bash -s --
+```
+
+(On a writable copy - e.g. you already `cp`'d the ISO contents to local
+disk - the plain `sudo bash 00_d1_linux_common_prepare.sh DC-LNX01` form
+works too, as long as the copy itself is confirmed CRLF-free.)
+
 ## 4. Verification
 
-Run:
+- **Cisco** - `validation/validate_cisco_clean_baseline.txt` is not a single
+  script; each section names the device(s) it targets. In short:
+  - routing/OSPF/CDP/ping section → `Internet`, `MPLS`, `DC1`, `DC2`,
+    `DC-GW`, `HQ-GW1`, `HQ-GW2`, `HQ-SW-D`, `HQ-R`;
+  - `show standby brief` section → `HQ-GW1`, `HQ-GW2` only;
+  - VLAN/trunk/STP section → `HQ-SW` and `Switch` (the DC access switch)
+    only;
+  - sourced traceroutes → `HQ-GW1` and `HQ-GW2` only (see the file for
+    which traceroute goes on which).
 
-- Cisco: commands in `validation/validate_cisco_clean_baseline.txt`;
-- Linux: `validation/validate_linux_clean_baseline.sh`;
-- Windows: `validation/validate_windows_clean_baseline.ps1`.
+- **Linux** - `validate_linux_clean_baseline.sh` is generic; run it on
+  **every** Debian node (it reports the view from wherever it runs, and DC
+  vs. HQ nodes are expected to show different resolvers):
+  `DC-LNX01`, `DC-LNX02`, `DC-SVC01`, `DC-CL01`, `HQ-LNX01`.
 
-Do not apply any Day 2 fault script until every check above passes and a
-snapshot has been taken (see `WHAT_TO_SNAPSHOT.md`).
+  ```bash
+  tr -d '\r' <"$D1/../validation/validate_linux_clean_baseline.sh" | bash
+  ```
+
+  (same CRLF-safe pattern as section 3 - run this on each of the 5 nodes.)
+
+- **Windows** - `validate_windows_clean_baseline.ps1` is likewise generic;
+  run it on **every** Windows node: `HQ-AD01`, `HQ-FILE01`, `HQ-WS01`,
+  `DC-Win01`.
+
+Do not apply any Day 2 fault script until every check above passes on every
+listed node and a snapshot has been taken (see `WHAT_TO_SNAPSHOT.md`).

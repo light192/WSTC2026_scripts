@@ -1,0 +1,15 @@
+{
+  "name": "A5_Evaluation_Scripts_Shanghai_Shenzhen",
+  "module": "A5",
+  "structure_source": "A4",
+  "marking_scheme_source": "Module A/A5_Marking_Scheme_Balanced_Championship_Detailed_HowToMark_RU_v2.pdf",
+  "task_source": "Module A/A5_Competitor_Task_EN_styled.pdf",
+  "recommended_remote_launch_host": "idm-a5",
+  "recommended_remote_launch_ip": "10.55.40.10",
+  "domain": "atlas.a5.test",
+  "remote_script": "remote/a5-evaluate-remote.sh",
+  "local_script": "local/a5-local-check.sh",
+  "criteria_map": "criteria/a5_criteria_map.tsv",
+  "criteria_count": 96,
+  "total_marks": 25.0
+}

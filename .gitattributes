@@ -1,0 +1,13 @@
+# Baseline: let git decide text-vs-binary per-content, never silently
+# corrupt binaries.
+* text=auto
+
+# Force LF line endings for scripts that run on Linux, regardless of any
+# core.autocrlf setting (Git for Windows ships with autocrlf=true by
+# default, which silently rewrites LF -> CRLF on checkout/clone/archive and
+# breaks bash `case`/`if`/`for` parsing - see D1_new troubleshooting).
+*.sh text eol=lf
+
+# Cisco console-paste files: also keep LF so pasted config lines don't carry
+# a stray CR into the device console.
+*.ios text eol=lf

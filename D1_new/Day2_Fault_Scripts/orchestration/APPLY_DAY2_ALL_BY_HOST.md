@@ -28,7 +28,19 @@ Run PowerShell as Administrator:
 
 ## Linux hosts
 
-Copy and run as root:
+If these files are delivered via a mounted **read-only** ISO, don't run
+`bash script.sh` directly — pipe through `tr -d '\r'` first so a CRLF-tainted
+copy on the ISO can't produce an unfixable-in-place `syntax error near
+unexpected token` (see `Clean_Baseline_Scripts/docs/RUN_ORDER.md` for the
+full explanation):
+
+```bash
+D2=/mnt/Day2_Fault_Scripts/linux/day2   # adjust to your actual mount point
+
+tr -d '\r' <"$D2/HQ-LNX01_apply_day2_matched_faults.sh"  | sudo bash -s --
+tr -d '\r' <"$D2/DC-SVC01_apply_day2_matched_faults.sh"  | sudo bash -s --
+tr -d '\r' <"$D2/DC-LNX02_apply_day2_matched_faults.sh"  | sudo bash -s --
+```
 
 | Host | File |
 |---|---|

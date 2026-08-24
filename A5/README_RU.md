@@ -1,0 +1,100 @@
+# Скрипты проверки A5 — Shanghai/Shenzhen
+
+Пакет создан по структуре A4 (унаследованной от A3/A2/A1) для Training A5
+«Integrated Enterprise Linux Services» — DNS, OpenLDAP+TLS+SSSD, DHCPv4+relay,
+HTTPS-портал с LDAP-аутентификацией, Chrony, central rsyslog, nftables,
+Ansible.
+
+- источник задания: `Module A/A5_Competitor_Task_EN_styled.pdf`;
+- источник критериев: `A5_Marking_Scheme_Balanced_Championship_Detailed_HowToMark_RU_v2.pdf`;
+- карта: `criteria/a5_criteria_map.tsv` — 96 Measurement-аспектов, 25.00 баллов.
+
+## Топология и учётные данные
+
+| Узел | Роль | IP (для SSH) |
+|---|---|---|
+| idm-a5 | Primary DNS, OpenLDAP, local CA, Chrony server, Ansible control | 10.55.40.10 |
+| net-a5 | Secondary DNS, Kea DHCPv4, central rsyslog | 10.55.40.20 |
+| portal-a5 | Apache HTTPS portal с LDAP-аутентификацией | 10.55.30.10 |
+| sh-gw-a5 | L3 gateway, DHCP relay, nftables (Shanghai) | 10.55.10.1 |
+| sh-client-a5 | DHCP client, DNS/LDAP/HTTPS validation | 10.55.10.100 |
+| sz-gw-a5 | L3 gateway, DHCP relay, nftables (Shenzhen) | 10.55.20.1 |
+| sz-client-a5 | DHCP client, user/evidence workstation | 10.55.20.100 |
+
+Домен: `atlas.a5.test`. Пароль тестовых LDAP-пользователей (nora, erlan) и
+корневой пароль по умолчанию: `Skill39@A5`. Пароль bind-аккаунта
+`ldap-reader`: `Skill39@A5-Reader` (см. HowToMark).
+
+## Запуск
+
+Рекомендуемый judge/evidence host — **idm-a5 (`10.55.40.10`)**, он же control
+node Ansible и место каталога `/opt/grading/a5/`. Из каталога пакета:
+
+```bash
+sudo bash remote/a5-evaluate-remote.sh \
+  --report-dir /opt/grading/a5/eval-report
+```
+
+Без пауз или с нужного аспекта:
+
+```bash
+sudo bash remote/a5-evaluate-remote.sh --no-pause \
+  --start-from A5.4.06 --report-dir /opt/grading/a5/eval-report
+```
+
+Restart/persistence-аспекты (A5.1.10 reboot; A5.3.12, A5.5.12, A5.6.08
+restart) по умолчанию получают SKIP. После согласованного restart/reboot:
+
+```bash
+sudo bash remote/a5-evaluate-remote.sh --post-reboot \
+  --start-from A5.1.10 --report-dir /opt/grading/a5/post-reboot-report
+```
+
+## Формат проверки
+
+Перед каждым аспектом выводятся описание, готовая команда How to Mark,
+ожидаемый результат, полный stdout/stderr и PASS/FAIL. SSH работает только в
+BatchMode с ограниченным timeout. Отчёты:
+
+- `a5-results.tsv`;
+- `a5-detail.log`;
+- `a5-summary.txt`.
+
+Если DNS не работает, сервис следует повторно проверить по IP и зафиксировать
+DNS как primary failure. Отрицательные firewall/LDAP-anonymous/AXFR-проверки
+оцениваются по отсутствию успешного результата, а не по exit code команды с
+`|| true`. Во время A5.2.12 (проверка secondary-failover) primary BIND9
+намеренно останавливается — обязательно перезапустить его после теста
+(скрипт делает это автоматически последней командой критерия).
+
+Критерии A5.8.04–A5.8.07 (distinct Ansible common actions) и A5.9.02
+(соответствие evidence содержимому задания) требуют финального ручного
+подтверждения экспертом: автоматика лишь собирает `--list-tasks`/`--check`
+вывод и grep по evidence-файлам, а решение о том, что все четыре категории
+различны (иначе — Duplicate category = 0), принимает эксперт.
+
+## Локальный fallback
+
+На недоступном по SSH узле:
+
+```bash
+sudo bash local/a5-local-check.sh --no-pause \
+  --report-dir /opt/grading/a5/local-report
+```
+
+Объединение локальных результатов:
+
+```bash
+bash utils/a5-merge-local-results.sh /opt/grading/a5/local-report
+```
+
+Переменные:
+
+```bash
+export A5_DOMAIN='atlas.a5.test'
+export A5_ROOT_PASS='Skill39@A5'
+export A5_LDAP_USER_PASS='Skill39@A5'
+export A5_LDAP_READER_PASS='Skill39@A5-Reader'
+export A5_TIMEOUT=6
+export A5_CMD_TIMEOUT=180
+```
