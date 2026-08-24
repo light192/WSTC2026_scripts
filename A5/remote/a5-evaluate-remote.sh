@@ -54,7 +54,7 @@ manual_commands_for() {
 }
 
 ssh_precheck() {
-  section "Предварительная проверка root SSH с idm-a5"
+  section "Preliminary root SSH check from idm-a5"
   local name ip out
   while IFS='=' read -r name ip; do
     [[ "$name" =~ ^[[:space:]]*# ]] && continue
@@ -88,12 +88,12 @@ EOF
     printf '%s\n' "$command"
   } > "$tmp"
   chmod 700 "$tmp"
-  echo -e "${BLUE}Полный фактический вывод (stdout/stderr):${NC}"
+  echo -e "${BLUE}Full actual output (stdout/stderr):${NC}"
   timeout "$A5_CMD_TIMEOUT" bash "$tmp" </dev/null 2>&1 |
     tee -a "$A5_DETAIL_LOG" "$out_file"
   A5_LAST_RC="${PIPESTATUS[0]}"
   A5_LAST_OUT="$(cat "$out_file")"
-  [ -s "$out_file" ] || echo "(пустой вывод)"
+  [ -s "$out_file" ] || echo "(empty output)"
   rm -f "$tmp" "$out_file"
 }
 
@@ -147,7 +147,7 @@ evaluate_components() {
   component_reset
   case "$id" in
     A5.2.03)
-      echo -e "${BLUE}Покомпонентная оценка:${NC}"
+      echo -e "${BLUE}Per-component evaluation:${NC}"
       while IFS='|' read -r name expected; do
         component_check "${name}.${A5_DOMAIN} -> ${expected}" \
           text_has_fixed "$o" "$expected"
@@ -169,7 +169,7 @@ portal-a5|2001:db8:a5:30::10
 EOF
       ;;
     A5.2.04)
-      echo -e "${BLUE}Покомпонентная оценка:${NC}"
+      echo -e "${BLUE}Per-component evaluation:${NC}"
       component_check "ldap.${A5_DOMAIN} -> idm-a5.${A5_DOMAIN}." \
         text_has_fixed "$o" 'CNAME=ldap;ACTUAL=idm-a5.atlas.a5.test.'
       component_check "dns1.${A5_DOMAIN} -> idm-a5.${A5_DOMAIN}." \
@@ -182,14 +182,14 @@ EOF
         text_has_fixed "$o" 'CNAME=syslog;ACTUAL=net-a5.atlas.a5.test.'
       ;;
     A5.4.03)
-      echo -e "${BLUE}Покомпонентная оценка (сопоставление внутри одной LDIF-записи):${NC}"
+      echo -e "${BLUE}Per-component evaluation (matched within a single LDIF record):${NC}"
       component_check "netops: gidNumber=5501" \
         ldif_line_in_record "$o" 'cn: netops' 'gidnumber: 5501'
       component_check "webops: gidNumber=5502" \
         ldif_line_in_record "$o" 'cn: webops' 'gidnumber: 5502'
       ;;
     A5.4.04)
-      echo -e "${BLUE}Покомпонентная оценка (сопоставление внутри одной LDIF-записи):${NC}"
+      echo -e "${BLUE}Per-component evaluation (matched within a single LDIF record):${NC}"
       component_check "nora: uidNumber=6501" \
         ldif_line_in_record "$o" 'uid: nora' 'uidnumber: 6501'
       component_check "nora: gidNumber=5501" \
@@ -200,34 +200,34 @@ EOF
         ldif_line_in_record "$o" 'uid: erlan' 'gidnumber: 5501'
       ;;
     A5.4.05)
-      echo -e "${BLUE}Покомпонентная оценка (сопоставление внутри записи cn: webops):${NC}"
-      component_check "webops содержит nora (member/memberUid)" \
+      echo -e "${BLUE}Per-component evaluation (matched within the cn: webops record):${NC}"
+      component_check "webops contains nora (member/memberUid)" \
         ldif_line_in_record "$o" 'cn: webops' 'member(uid)?: .*nora'
-      component_check "webops НЕ содержит erlan (member/memberUid)" \
+      component_check "webops does NOT contain erlan (member/memberUid)" \
         not_ldif_line_in_record "$o" 'cn: webops' 'member(uid)?: .*erlan'
       ;;
     A5.6.06)
-      echo -e "${BLUE}Покомпонентная оценка:${NC}"
+      echo -e "${BLUE}Per-component evaluation:${NC}"
       for name in sh-gw-a5.log sz-gw-a5.log idm-a5.log portal-a5.log; do
-        component_check "central log-файл ${name} присутствует" text_has_fixed "$o" "$name"
+        component_check "central log file ${name} present" text_has_fixed "$o" "$name"
       done
       ;;
     A5.6.07)
-      echo -e "${BLUE}Покомпонентная оценка:${NC}"
+      echo -e "${BLUE}Per-component evaluation:${NC}"
       for name in sh-gw-a5 sz-gw-a5 idm-a5 portal-a5; do
-        component_check "${name}: маркер A5_READY получен централизованно" \
+        component_check "${name}: A5_READY marker received centrally" \
           text_has_fixed "$o" "A5_READY $name"
       done
       ;;
     A5.9.01)
-      echo -e "${BLUE}Покомпонентная оценка:${NC}"
+      echo -e "${BLUE}Per-component evaluation:${NC}"
       for f in network.txt dns.txt dhcp.txt ldap.txt portal.txt ops.txt ansible.txt notes.txt; do
-        component_check "$f присутствует и не пуст" text_has_fixed "$o" "$f OK"
+        component_check "$f present and non-empty" text_has_fixed "$o" "$f OK"
       done
       ;;
   esac
   if [ "$A5_COMPONENT_TOTAL" -gt 0 ]; then
-    A5_COMPONENT_MESSAGE="${A5_COMPONENT_PASS}/${A5_COMPONENT_TOTAL} компонентов пройдено"
+    A5_COMPONENT_MESSAGE="${A5_COMPONENT_PASS}/${A5_COMPONENT_TOTAL} components passed"
     return 0
   fi
   return 1
@@ -359,12 +359,12 @@ show_diagnostics() {
   local id="$1" o="$2" name expected actual
   case "$id" in
     A5.2.03)
-      echo -e "${BLUE}Подробная проверка свойств:${NC}"
+      echo -e "${BLUE}Detailed property check:${NC}"
       while IFS='|' read -r name expected; do
         if grep -Fqi "$expected" <<<"$o"; then
           echo -e "${GREEN}[OK]${NC} ${name}.${A5_DOMAIN} -> ${expected}"
         else
-          echo -e "${RED}[FAIL]${NC} ${name}.${A5_DOMAIN}: ожидается ${expected}"
+          echo -e "${RED}[FAIL]${NC} ${name}.${A5_DOMAIN}: expected ${expected}"
         fi
       done <<'EOF'
 sh-gw-a5|10.55.10.1
@@ -384,14 +384,14 @@ portal-a5|2001:db8:a5:30::10
 EOF
       ;;
     A5.2.04)
-      echo -e "${BLUE}Подробная проверка свойств:${NC}"
+      echo -e "${BLUE}Detailed property check:${NC}"
       while IFS='|' read -r name expected; do
         actual="$(sed -n "s/^CNAME=${name};ACTUAL=//p" <<<"$o" | head -n1)"
         [ -n "$actual" ] || actual="<EMPTY>"
         if [ "${actual,,}" = "${expected,,}" ]; then
           echo -e "${GREEN}[OK]${NC} ${name}.${A5_DOMAIN} -> ${actual}"
         else
-          echo -e "${RED}[FAIL]${NC} ${name}.${A5_DOMAIN}: ожидается ${expected}; получено ${actual}"
+          echo -e "${RED}[FAIL]${NC} ${name}.${A5_DOMAIN}: expected ${expected}; got ${actual}"
         fi
       done <<'EOF'
 ldap|idm-a5.atlas.a5.test.
@@ -411,10 +411,9 @@ validate_start() {
 
 main() {
   validate_start
-  console_font_hint
-  echo -e "${CYAN}A5 remote evaluator — Integrated Enterprise Linux Services (build $A5_BUILD)${NC}"
-  echo "Рекомендуемый хост запуска: idm-a5 (10.55.40.10)"
-  echo "Отчёты: $A5_REPORT_DIR"
+  echo -e "${CYAN}A5 remote evaluator - Integrated Enterprise Linux Services (build $A5_BUILD)${NC}"
+  echo "Recommended launch host: idm-a5 (10.55.40.10)"
+  echo "Reports: $A5_REPORT_DIR"
   ssh_precheck
   local started=0 id sub desc mark runfrom commands expected notes command awarded last_sub=""
   while IFS=$'\t' read -r id sub desc mark runfrom commands expected notes; do
@@ -424,13 +423,13 @@ main() {
     if [ "$sub" != "$last_sub" ]; then section "$sub"; last_sub="$sub"; fi
     step "$id" "$desc"
     if [[ "$PERSISTENCE_IDS" == *" $id "* ]] && [ "$A5_POST_REBOOT" != 1 ]; then
-      skip "$id" "$mark" "используйте --post-reboot после согласованного restart/reboot"
+      skip "$id" "$mark" "use --post-reboot after a coordinated restart/reboot"
       continue
     fi
     command="$(decode_newlines "$commands")"
     cmd_show "$id" "$command"
     run_command "$id" "$command"
-    show_output "ExitCode=$A5_LAST_RC (полный вывод показан выше)"
+    show_output "ExitCode=$A5_LAST_RC (full output shown above)"
     if evaluate_components "$id" "$A5_LAST_OUT"; then
       if [ "$A5_COMPONENT_PASS" -eq "$A5_COMPONENT_TOTAL" ]; then
         pass "$id" "$mark" "$A5_COMPONENT_MESSAGE"
@@ -443,10 +442,10 @@ main() {
       fi
     elif evaluate_result "$id" "$A5_LAST_OUT" "$A5_LAST_RC"; then
       show_diagnostics "$id" "$A5_LAST_OUT"
-      pass "$id" "$mark" "фактический вывод соответствует ожидаемому результату"
+      pass "$id" "$mark" "actual output matches the expected result"
     else
       show_diagnostics "$id" "$A5_LAST_OUT"
-      fail "$id" "$mark" "ожидаемые свойства не подтверждены: $expected"
+      fail "$id" "$mark" "expected properties not confirmed: $expected"
     fi
   done < "$A5_CRITERIA_MAP"
   write_summary

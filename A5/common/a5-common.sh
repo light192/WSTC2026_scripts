@@ -33,10 +33,10 @@ decode_newlines() {
 pause_if_needed() {
   [ "$A5_PAUSE" = 1 ] || return 0
   if { exec 9</dev/tty; } 2>/dev/null; then
-    read -r -p "Нажмите [ENTER], чтобы продолжить..." <&9
+    read -r -p "Press [ENTER] to continue..." <&9
     exec 9<&-
   else
-    echo "Интерактивная консоль недоступна; продолжаю без паузы."
+    echo "Interactive console not available; continuing without pause."
   fi
 }
 
@@ -47,66 +47,23 @@ section() {
   echo -e "${PURPLE}======================================================================================${NC}"
 }
 
-# Best-effort, PURELY INFORMATIONAL hint: on a bare Linux VGA/virtual console
-# (TERM=linux, e.g. hypervisor console view without SSH/X11) the loaded console
-# font often has no Cyrillic glyphs, so UTF-8 Cyrillic text renders as
-# CP437-style pseudographics even though the bytes/encoding are correct.
-#
-# This function NEVER changes any system state (no setfont, no console-setup
-# calls) - an earlier version tried an automatic setfont "fix" and that made
-# things worse in practice (picked an oversized font, garbled the live
-# console mid-session). Font selection is left entirely to the operator.
-#
-# IMPORTANT: this hint is intentionally written in plain ASCII, NOT Russian.
-# If the console font can't render Cyrillic, a Cyrillic-language explanation of
-# that exact problem is unreadable too - so this must stay ASCII-only to work.
-console_font_hint() {
-  [ "${TERM:-}" = "linux" ] || return 0
-  [ "${A5_CONSOLE_HINT_SHOWN:-0}" = 1 ] && return 0
-  A5_CONSOLE_HINT_SHOWN=1
-  echo "############################################################"
-  echo "# NOTE (plain ASCII on purpose - see why below):"
-  echo "# You are on a bare VGA/virtual console (TERM=linux, no SSH)."
-  echo "# If the Cyrillic text below looks like symbols/pseudographics,"
-  echo "# it is NOT a script bug: the loaded console font has no"
-  echo "# Cyrillic glyphs, even though the UTF-8 bytes are correct."
-  echo "# This script does NOT change the console font automatically -"
-  echo "# pick and load a font yourself if you want to fix it:"
-  echo "#"
-  echo "#   ls /usr/share/consolefonts/ | grep -i cyr"
-  echo "#   setfont <name-you-found>   # try one; if it looks wrong/huge,"
-  echo "#                              # just run: setfont   (resets it)"
-  echo "# Permanent fix (persists across reboots):"
-  echo "#   dpkg-reconfigure console-setup  # pick UTF-8 + a Cyrillic-capable"
-  echo "#                                   # charset, then run: setupcon"
-  echo "#"
-  echo "# Easiest option: connect to idm-a5 over SSH from a normal terminal"
-  echo "# on your own machine (PuTTY / Windows Terminal / any modern app) -"
-  echo "# those always have full Cyrillic font support, nothing to fix."
-  echo "#"
-  echo "# This does NOT affect PASS/FAIL or the score: report files"
-  echo "# (a5-results.tsv etc.) are always written in correct UTF-8"
-  echo "# regardless of what this screen can display."
-  echo "############################################################"
-}
-
 print_criterion_context() {
   local id="$1"
   [ "$A5_LAST_CONTEXT_ID" = "$id" ] && return 0
   A5_LAST_CONTEXT_ID="$id"
   awk -F'\t' -v id="$id" -v blue="$BLUE" -v nc="$NC" '
     NR>1 && $1==id {
-      print blue "Критерий: " $1 " — " $3 nc
-      print blue "Рекомендуемая точка запуска:" nc; print $5
-      print blue "Команды для ручной проверки:" nc
-      print "Готовые команды без служебной логики evaluator показаны ниже."
-      print blue "Ожидаемый результат:" nc; print $7
-      if ($8!="") { print blue "Примечания:" nc; print $8 }
+      print blue "Criterion: " $1 " - " $3 nc
+      print blue "Recommended launch point:" nc; print $5
+      print blue "Commands for manual verification:" nc
+      print "Ready-to-copy commands without evaluator scaffolding are shown below."
+      print blue "Expected result:" nc; print $7
+      if ($8!="") { print blue "Notes:" nc; print $8 }
       exit
     }' "$A5_CRITERIA_MAP" | tee -a "$A5_DETAIL_LOG"
 }
 
-step() { local id="$1"; shift; echo -e "${YELLOW}Шаг: $id $*${NC}"; print_criterion_context "$id"; }
+step() { local id="$1"; shift; echo -e "${YELLOW}Step: $id $*${NC}"; print_criterion_context "$id"; }
 cmd_show() {
   local id automatic display
   if [ "$#" -eq 1 ]; then
@@ -119,14 +76,14 @@ cmd_show() {
   else
     display="$automatic"
   fi
-  echo -e "${BLUE}Готовые команды для копирования и ручной проверки:${NC}"
+  echo -e "${BLUE}Ready-to-copy commands for manual verification:${NC}"
   printf '%s\n' "$display"
-  echo -e "${BLUE}Автоматическая проверка запускается evaluator без вывода служебной обвязки.${NC}"
+  echo -e "${BLUE}The automatic check runs below without extra scaffolding output.${NC}"
 }
-show_output() { [ -z "$A5_PENDING_OUTPUT" ] || A5_PENDING_OUTPUT+=$'\n'; A5_PENDING_OUTPUT+="${1:-(пустой вывод)}"; }
+show_output() { [ -z "$A5_PENDING_OUTPUT" ] || A5_PENDING_OUTPUT+=$'\n'; A5_PENDING_OUTPUT+="${1:-(empty output)}"; }
 flush_output() {
   [ -n "$A5_PENDING_OUTPUT" ] || return 0
-  echo -e "${BLUE}Завершение команды:${NC}" | tee -a "$A5_DETAIL_LOG"
+  echo -e "${BLUE}Command output:${NC}" | tee -a "$A5_DETAIL_LOG"
   printf '%s\n' "$A5_PENDING_OUTPUT" | tee -a "$A5_DETAIL_LOG"
   A5_PENDING_OUTPUT=""
 }
@@ -136,15 +93,15 @@ record_result() {
   print_criterion_context "$id"; flush_output
   printf '%s\t%s\t%s\t%s\n' "$id" "$mark" "$status" "${msg//$'\t'/ }" >> "$A5_RESULTS_TSV"
   case "$status" in
-    PASS) echo -e "${GREEN}PASS [$id/$mark] — $msg${NC}" ;;
-    FAIL) echo -e "${RED}FAIL [$id/$mark] — $msg${NC}" ;;
+    PASS) echo -e "${GREEN}PASS [$id/$mark] - $msg${NC}" ;;
+    FAIL) echo -e "${RED}FAIL [$id/$mark] - $msg${NC}" ;;
     PART)
       local awarded="${msg#awarded=}"
       awarded="${awarded%%;*}"
-      echo -e "${PURPLE}PART [$id $awarded/$mark] — ${msg#*;}${NC}"
+      echo -e "${PURPLE}PART [$id $awarded/$mark] - ${msg#*;}${NC}"
       ;;
-    WARN) echo -e "${YELLOW}WARN [$id/$mark] — $msg${NC}" ;;
-    SKIP) echo -e "${CYAN}SKIP [$id/$mark] — $msg${NC}" ;;
+    WARN) echo -e "${YELLOW}WARN [$id/$mark] - $msg${NC}" ;;
+    SKIP) echo -e "${CYAN}SKIP [$id/$mark] - $msg${NC}" ;;
   esac
   pause_if_needed
 }
@@ -168,9 +125,9 @@ write_summary() {
       else if($3=="PART") { msg=$4; sub(/^awarded=/,"",msg); sub(/;.*/,"",msg); score+=msg+0; missed[$3]+=$2-(msg+0) }
       else missed[$3]+=$2
     }
-    END { printf "Сводка проверки A5\n===================\n";
-      printf "Засчитано: %.2f / %.2f\n",score,total;
+    END { printf "A5 verification summary\n========================\n";
+      printf "Awarded: %.2f / %.2f\n",score,total;
       printf "PASS: %d, PART: %d, FAIL: %d, WARN: %d, SKIP: %d\n",count["PASS"],count["PART"],count["FAIL"],count["WARN"],count["SKIP"];
-      printf "Не засчитано: %.2f; частично потеряно: %.2f; предупреждения: %.2f; пропущено: %.2f\n",missed["FAIL"],missed["PART"],missed["WARN"],missed["SKIP"] }' \
+      printf "Not awarded: %.2f; partially lost: %.2f; warnings: %.2f; skipped: %.2f\n",missed["FAIL"],missed["PART"],missed["WARN"],missed["SKIP"] }' \
     "$A5_RESULTS_TSV" | tee "$summary"
 }
