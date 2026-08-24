@@ -51,18 +51,64 @@ section() {
 # e.g. hypervisor console view without SSH/X11) the loaded console font often has
 # no Cyrillic glyphs, so UTF-8 Cyrillic text renders as CP437-style pseudographics
 # even though the bytes/encoding are correct. This never modifies system state.
+#
+# IMPORTANT: this hint is intentionally written in plain ASCII, NOT Russian.
+# If the console font can't render Cyrillic, a Cyrillic-language explanation of
+# that exact problem is unreadable too - so this must stay ASCII-only to work.
+
+# Safe, session-only, best-effort attempt to load a Cyrillic-capable console
+# font. Never touches /etc (no persistent config change), never errors out if
+# setfont/fonts are missing, and only runs on a bare VGA console as root.
+console_font_autofix() {
+  [ "${TERM:-}" = "linux" ] || return 1
+  [ "$(id -u 2>/dev/null)" = 0 ] || return 1
+  command -v setfont >/dev/null 2>&1 || return 1
+  local f
+  for f in /usr/share/consolefonts/*[Cc]yr* /usr/share/consolefonts/Uni2-Terminus* \
+           /usr/share/consolefonts/Uni3-Terminus* /usr/share/consolefonts/LatKaCyrHeb*; do
+    [ -e "$f" ] || continue
+    setfont "$f" >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+
 console_font_hint() {
   [ "${TERM:-}" = "linux" ] || return 0
   [ "${A5_CONSOLE_HINT_SHOWN:-0}" = 1 ] && return 0
   A5_CONSOLE_HINT_SHOWN=1
-  echo -e "${YELLOW}Обнаружена текстовая VGA-консоль (TERM=linux, без SSH/X11).${NC}"
-  echo -e "${YELLOW}Если кириллица отображается как псевдографика/значки — это не ошибка вывода,${NC}"
-  echo -e "${YELLOW}а отсутствие кириллицы в загруженном шрифте консоли. Быстрая проверка/фикс:${NC}"
-  echo "  ls /usr/share/consolefonts/ | grep -i cyr"
-  echo "  setfont <найденное-имя>          # например: setfont LatKaCyrHeb-16"
-  echo "  # для постоянного решения: dpkg-reconfigure console-setup (кодировка UTF-8, набор с Cyrillic), затем setupcon"
-  echo -e "${YELLOW}Проще всего — подключиться по SSH с обычного терминала: там шрифт полноценный.${NC}"
-  echo -e "${YELLOW}На PASS/FAIL/баллы это не влияет — результаты пишутся в отчёты корректным UTF-8.${NC}"
+  local autofixed=0
+  console_font_autofix && autofixed=1
+  echo "############################################################"
+  echo "# NOTE (plain ASCII on purpose - see why below):"
+  echo "# You are on a bare VGA/virtual console (TERM=linux, no SSH)."
+  if [ "$autofixed" = 1 ]; then
+    echo "# Attempted an automatic session-only console font fix (setfont)."
+    echo "# If the Cyrillic text below now looks correct, you're done -"
+    echo "# nothing was changed permanently (font reverts on reboot/logout)."
+    echo "# If it STILL looks like symbols/pseudographics, use the manual"
+    echo "# steps below."
+  else
+    echo "# If the Cyrillic text below looks like symbols/pseudographics,"
+    echo "# it is NOT a script bug: the loaded console font has no"
+    echo "# Cyrillic glyphs, even though the UTF-8 bytes are correct."
+    echo "# (Automatic fix attempt did not find/apply a Cyrillic font.)"
+  fi
+  echo "#"
+  echo "# Quick fix (run as root, in another window/session):"
+  echo "#   ls /usr/share/consolefonts/ | grep -i cyr"
+  echo "#   setfont <name-you-found>        # e.g.: setfont LatKaCyrHeb-16"
+  echo "# Permanent fix:"
+  echo "#   dpkg-reconfigure console-setup  # pick UTF-8 + a Cyrillic-capable"
+  echo "#                                   # charset, then run: setupcon"
+  echo "#"
+  echo "# Easiest option: connect to idm-a5 over SSH from a normal terminal"
+  echo "# on your own machine (PuTTY / Windows Terminal / any modern app) -"
+  echo "# those always have full Cyrillic font support."
+  echo "#"
+  echo "# This does NOT affect PASS/FAIL or the score: report files"
+  echo "# (a5-results.tsv etc.) are always written in correct UTF-8"
+  echo "# regardless of what this screen can display."
+  echo "############################################################"
 }
 
 print_criterion_context() {
