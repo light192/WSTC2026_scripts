@@ -47,6 +47,13 @@ section() {
   echo -e "${PURPLE}======================================================================================${NC}"
 }
 
+# Thin rule used to separate the logical blocks within a single criterion's
+# output (context -> manual commands -> live command output -> verdict), and
+# to mark the start of a new criterion. Distinct from section()'s heavier
+# '=' banner, which separates whole subsections (A5.1, A5.2, ...).
+DIVIDER='------------------------------------------------------------------------------------'
+divider() { echo -e "${PURPLE}${DIVIDER}${NC}"; }
+
 print_criterion_context() {
   local id="$1"
   [ "$A5_LAST_CONTEXT_ID" = "$id" ] && return 0
@@ -63,7 +70,7 @@ print_criterion_context() {
     }' "$A5_CRITERIA_MAP" | tee -a "$A5_DETAIL_LOG"
 }
 
-step() { local id="$1"; shift; echo -e "${YELLOW}Step: $id $*${NC}"; print_criterion_context "$id"; }
+step() { local id="$1"; shift; divider; echo -e "${YELLOW}Step: $id $*${NC}"; print_criterion_context "$id"; }
 cmd_show() {
   local id automatic display
   if [ "$#" -eq 1 ]; then
@@ -76,6 +83,7 @@ cmd_show() {
   else
     display="$automatic"
   fi
+  divider
   echo -e "${BLUE}Ready-to-copy commands for manual verification:${NC}"
   printf '%s\n' "$display"
   echo -e "${BLUE}The automatic check runs below without extra scaffolding output.${NC}"
@@ -92,6 +100,7 @@ record_result() {
   local id="$1" mark="$2" status="$3" msg="$4"
   print_criterion_context "$id"; flush_output
   printf '%s\t%s\t%s\t%s\n' "$id" "$mark" "$status" "${msg//$'\t'/ }" >> "$A5_RESULTS_TSV"
+  divider
   case "$status" in
     PASS) echo -e "${GREEN}PASS [$id/$mark] - $msg${NC}" ;;
     FAIL) echo -e "${RED}FAIL [$id/$mark] - $msg${NC}" ;;

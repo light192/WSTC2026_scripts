@@ -88,6 +88,7 @@ EOF
     printf '%s\n' "$command"
   } > "$tmp"
   chmod 700 "$tmp"
+  divider
   echo -e "${BLUE}Full actual output (stdout/stderr):${NC}"
   timeout "$A5_CMD_TIMEOUT" bash "$tmp" </dev/null 2>&1 |
     tee -a "$A5_DETAIL_LOG" "$out_file"
