@@ -23,6 +23,7 @@ capture() {
   if [ "$rc" -eq 0 ] && [ -n "$out" ]; then pass "$id" "$mark" "локальное evidence собрано на $HN"
   else fail "$id" "$mark" "локальная команда завершилась ошибкой на $HN"; fi
 }
+console_font_hint
 section "A5 local fallback — $HN"
 capture A5.1.01 0.25 hostname "hostnamectl --static; getent hosts \$(hostname -s) 2>/dev/null || true"
 capture A5.1.02 0.25 addressing "ip -4 -br addr; ip -6 -br addr show scope global"

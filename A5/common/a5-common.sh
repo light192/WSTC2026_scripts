@@ -47,6 +47,24 @@ section() {
   echo -e "${PURPLE}======================================================================================${NC}"
 }
 
+# Best-effort, non-invasive hint: on a bare Linux VGA/virtual console (TERM=linux,
+# e.g. hypervisor console view without SSH/X11) the loaded console font often has
+# no Cyrillic glyphs, so UTF-8 Cyrillic text renders as CP437-style pseudographics
+# even though the bytes/encoding are correct. This never modifies system state.
+console_font_hint() {
+  [ "${TERM:-}" = "linux" ] || return 0
+  [ "${A5_CONSOLE_HINT_SHOWN:-0}" = 1 ] && return 0
+  A5_CONSOLE_HINT_SHOWN=1
+  echo -e "${YELLOW}Обнаружена текстовая VGA-консоль (TERM=linux, без SSH/X11).${NC}"
+  echo -e "${YELLOW}Если кириллица отображается как псевдографика/значки — это не ошибка вывода,${NC}"
+  echo -e "${YELLOW}а отсутствие кириллицы в загруженном шрифте консоли. Быстрая проверка/фикс:${NC}"
+  echo "  ls /usr/share/consolefonts/ | grep -i cyr"
+  echo "  setfont <найденное-имя>          # например: setfont LatKaCyrHeb-16"
+  echo "  # для постоянного решения: dpkg-reconfigure console-setup (кодировка UTF-8, набор с Cyrillic), затем setupcon"
+  echo -e "${YELLOW}Проще всего — подключиться по SSH с обычного терминала: там шрифт полноценный.${NC}"
+  echo -e "${YELLOW}На PASS/FAIL/баллы это не влияет — результаты пишутся в отчёты корректным UTF-8.${NC}"
+}
+
 print_criterion_context() {
   local id="$1"
   [ "$A5_LAST_CONTEXT_ID" = "$id" ] && return 0

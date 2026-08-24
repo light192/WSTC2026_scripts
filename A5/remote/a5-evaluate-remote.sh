@@ -411,6 +411,7 @@ validate_start() {
 
 main() {
   validate_start
+  console_font_hint
   echo -e "${CYAN}A5 remote evaluator — Integrated Enterprise Linux Services (build $A5_BUILD)${NC}"
   echo "Рекомендуемый хост запуска: idm-a5 (10.55.40.10)"
   echo "Отчёты: $A5_REPORT_DIR"
