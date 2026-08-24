@@ -47,63 +47,42 @@ section() {
   echo -e "${PURPLE}======================================================================================${NC}"
 }
 
-# Best-effort, non-invasive hint: on a bare Linux VGA/virtual console (TERM=linux,
-# e.g. hypervisor console view without SSH/X11) the loaded console font often has
-# no Cyrillic glyphs, so UTF-8 Cyrillic text renders as CP437-style pseudographics
-# even though the bytes/encoding are correct. This never modifies system state.
+# Best-effort, PURELY INFORMATIONAL hint: on a bare Linux VGA/virtual console
+# (TERM=linux, e.g. hypervisor console view without SSH/X11) the loaded console
+# font often has no Cyrillic glyphs, so UTF-8 Cyrillic text renders as
+# CP437-style pseudographics even though the bytes/encoding are correct.
+#
+# This function NEVER changes any system state (no setfont, no console-setup
+# calls) - an earlier version tried an automatic setfont "fix" and that made
+# things worse in practice (picked an oversized font, garbled the live
+# console mid-session). Font selection is left entirely to the operator.
 #
 # IMPORTANT: this hint is intentionally written in plain ASCII, NOT Russian.
 # If the console font can't render Cyrillic, a Cyrillic-language explanation of
 # that exact problem is unreadable too - so this must stay ASCII-only to work.
-
-# Safe, session-only, best-effort attempt to load a Cyrillic-capable console
-# font. Never touches /etc (no persistent config change), never errors out if
-# setfont/fonts are missing, and only runs on a bare VGA console as root.
-console_font_autofix() {
-  [ "${TERM:-}" = "linux" ] || return 1
-  [ "$(id -u 2>/dev/null)" = 0 ] || return 1
-  command -v setfont >/dev/null 2>&1 || return 1
-  local f
-  for f in /usr/share/consolefonts/*[Cc]yr* /usr/share/consolefonts/Uni2-Terminus* \
-           /usr/share/consolefonts/Uni3-Terminus* /usr/share/consolefonts/LatKaCyrHeb*; do
-    [ -e "$f" ] || continue
-    setfont "$f" >/dev/null 2>&1 && return 0
-  done
-  return 1
-}
-
 console_font_hint() {
   [ "${TERM:-}" = "linux" ] || return 0
   [ "${A5_CONSOLE_HINT_SHOWN:-0}" = 1 ] && return 0
   A5_CONSOLE_HINT_SHOWN=1
-  local autofixed=0
-  console_font_autofix && autofixed=1
   echo "############################################################"
   echo "# NOTE (plain ASCII on purpose - see why below):"
   echo "# You are on a bare VGA/virtual console (TERM=linux, no SSH)."
-  if [ "$autofixed" = 1 ]; then
-    echo "# Attempted an automatic session-only console font fix (setfont)."
-    echo "# If the Cyrillic text below now looks correct, you're done -"
-    echo "# nothing was changed permanently (font reverts on reboot/logout)."
-    echo "# If it STILL looks like symbols/pseudographics, use the manual"
-    echo "# steps below."
-  else
-    echo "# If the Cyrillic text below looks like symbols/pseudographics,"
-    echo "# it is NOT a script bug: the loaded console font has no"
-    echo "# Cyrillic glyphs, even though the UTF-8 bytes are correct."
-    echo "# (Automatic fix attempt did not find/apply a Cyrillic font.)"
-  fi
+  echo "# If the Cyrillic text below looks like symbols/pseudographics,"
+  echo "# it is NOT a script bug: the loaded console font has no"
+  echo "# Cyrillic glyphs, even though the UTF-8 bytes are correct."
+  echo "# This script does NOT change the console font automatically -"
+  echo "# pick and load a font yourself if you want to fix it:"
   echo "#"
-  echo "# Quick fix (run as root, in another window/session):"
   echo "#   ls /usr/share/consolefonts/ | grep -i cyr"
-  echo "#   setfont <name-you-found>        # e.g.: setfont LatKaCyrHeb-16"
-  echo "# Permanent fix:"
+  echo "#   setfont <name-you-found>   # try one; if it looks wrong/huge,"
+  echo "#                              # just run: setfont   (resets it)"
+  echo "# Permanent fix (persists across reboots):"
   echo "#   dpkg-reconfigure console-setup  # pick UTF-8 + a Cyrillic-capable"
   echo "#                                   # charset, then run: setupcon"
   echo "#"
   echo "# Easiest option: connect to idm-a5 over SSH from a normal terminal"
   echo "# on your own machine (PuTTY / Windows Terminal / any modern app) -"
-  echo "# those always have full Cyrillic font support."
+  echo "# those always have full Cyrillic font support, nothing to fix."
   echo "#"
   echo "# This does NOT affect PASS/FAIL or the score: report files"
   echo "# (a5-results.tsv etc.) are always written in correct UTF-8"
