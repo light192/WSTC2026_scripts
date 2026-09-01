@@ -62,9 +62,9 @@ print_criterion_context() {
   awk -F'\t' -v id="$id" -v blue="$BLUE" -v nc="$NC" '
     NR>1 && $1==id {
       print blue "Criterion: " $1 " - " $3 nc
-      print blue "Recommended launch point:" nc; print $5
-      print blue "Commands for manual verification:" nc
-      print "Ready-to-copy commands without evaluator scaffolding are shown below."
+      print blue "Devices / source:" nc; print $5
+      print blue "Manual verification procedure:" nc
+      print "The approved How to Mark procedure is shown below."
       print blue "Expected result:" nc; print $7
       if ($8!="") { print blue "Notes:" nc; print $8 }
       exit
@@ -85,7 +85,7 @@ cmd_show() {
     display="$automatic"
   fi
   divider
-  echo -e "${BLUE}Ready-to-copy commands for manual verification:${NC}"
+  echo -e "${BLUE}Manual verification procedure:${NC}"
   printf '%s\n' "$display"
   echo -e "${BLUE}The automatic check runs below without extra scaffolding output.${NC}"
 }

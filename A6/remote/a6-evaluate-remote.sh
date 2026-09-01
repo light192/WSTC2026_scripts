@@ -66,12 +66,31 @@ run_command() {
     cat <<EOF
 #!/usr/bin/env bash
 set -o pipefail
-ssh() { command timeout "${A6_TIMEOUT}s" /usr/bin/ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout="${A6_TIMEOUT}" -o ConnectionAttempts=1 -o GSSAPIAuthentication=no "\$@"; }
+ssh() {
+  local target="\${1:-unknown}" label
+  case "\$target" in
+    *@10.76.10.1) label='sh-edge-a6 (10.76.10.1)' ;;
+    *@10.76.10.100) label='sh-user-a6 (10.76.10.100)' ;;
+    *@10.76.20.1) label='sz-edge-a6 (10.76.20.1)' ;;
+    *@10.76.20.100) label='ops-a6 (10.76.20.100)' ;;
+    *@10.76.30.10) label='services-a6 (10.76.30.10)' ;;
+    *@10.76.40.10) label='directory-a6 (10.76.40.10)' ;;
+    *@10.76.40.20) label='network-a6 (10.76.40.20)' ;;
+    *) label="\$target" ;;
+  esac
+  printf '\n[DEVICE: %s]\n' "\$label" >&2
+  command timeout "${A6_TIMEOUT}s" /usr/bin/ssh \
+    -o BatchMode=yes -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+    -o ConnectTimeout="${A6_TIMEOUT}" -o ConnectionAttempts=1 \
+    -o GSSAPIAuthentication=no "\$@"
+}
 EOF
     printf '%s\n' "$command"
   } > "$tmp"
   chmod 700 "$tmp"
   divider; echo -e "${BLUE}Full actual output (stdout/stderr):${NC}"
+  echo -e "${BLUE}[COORDINATOR: $(hostname -s 2>/dev/null || hostname)]${NC}"
   timeout "$A6_CMD_TIMEOUT" bash "$tmp" </dev/null 2>&1 | tee -a "$A6_DETAIL_LOG" "$out_file"
   A6_LAST_RC="${PIPESTATUS[0]}"; A6_LAST_OUT="$(cat "$out_file")"
   [ -s "$out_file" ] || echo "(empty output)"
