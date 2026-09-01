@@ -66,7 +66,7 @@ print_criterion_context() {
       print blue "Manual verification procedure:" nc
       print "The approved How to Mark procedure is shown below."
       print blue "Expected result:" nc; print $7
-      if ($8!="") { print blue "Notes:" nc; print $8 }
+      if ($8!="" && $8!="No additional note.") { print blue "Notes:" nc; print $8 }
       exit
     }' "$A6_CRITERIA_MAP" | tee -a "$A6_DETAIL_LOG"
 }

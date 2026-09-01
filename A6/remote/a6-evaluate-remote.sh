@@ -8,6 +8,7 @@ source "$SCRIPT_DIR/../common/a6-common.sh"
 A6_HOSTS_FILE="${A6_HOSTS_FILE:-$SCRIPT_DIR/a6-hosts.conf}"
 A6_START_FROM="${A6_START_FROM:-A1.01}"
 A6_DISRUPTIVE="${A6_DISRUPTIVE:-0}"
+A6_TRACE="${A6_TRACE:-1}"
 A6_LAST_RC=0
 A6_LAST_OUT=""
 
@@ -19,6 +20,8 @@ Usage: sudo bash remote/a6-evaluate-remote.sh [options]
   --start-from C1.04      resume from an aspect
   --report-dir DIR        report output directory
   --disruptive            include controlled stop/restart/down/up checks
+  --trace                 show expanded automatic commands (default)
+  --no-trace              hide expanded command trace
   --hosts-file FILE       override host map
 EOF
 }
@@ -28,6 +31,8 @@ while [ $# -gt 0 ]; do
     --no-pause) A6_PAUSE=0 ;;
     --pause) A6_PAUSE=1 ;;
     --disruptive) A6_DISRUPTIVE=1 ;;
+    --trace) A6_TRACE=1 ;;
+    --no-trace) A6_TRACE=0 ;;
     --start-from) shift; A6_START_FROM="${1:?missing --start-from value}" ;;
     --report-dir) shift; A6_REPORT_DIR="${1:?missing --report-dir value}" ;;
     --hosts-file) shift; A6_HOSTS_FILE="${1:?missing --hosts-file value}" ;;
@@ -67,7 +72,7 @@ run_command() {
 #!/usr/bin/env bash
 set -o pipefail
 ssh() {
-  local target="\${1:-unknown}" label
+  local target="\${1:-unknown}" label display rc
   case "\$target" in
     *@10.76.10.1) label='sh-edge-a6 (10.76.10.1)' ;;
     *@10.76.10.100) label='sh-user-a6 (10.76.10.100)' ;;
@@ -79,18 +84,52 @@ ssh() {
     *) label="\$target" ;;
   esac
   printf '\n[DEVICE: %s]\n' "\$label" >&2
-  command timeout "${A6_TIMEOUT}s" /usr/bin/ssh \
-    -o BatchMode=yes -o StrictHostKeyChecking=no \
-    -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
-    -o ConnectTimeout="${A6_TIMEOUT}" -o ConnectionAttempts=1 \
-    -o GSSAPIAuthentication=no "\$@"
+  display="\$(printf '%q ' "\$@")"
+  display="\${display//Skill39@A6/<PASSWORD-REDACTED>}"
+  display="\${display//Reader39@A6/<PASSWORD-REDACTED>}"
+  display="\${display//Skill39-A6-Monitor!/<PASSWORD-REDACTED>}"
+  printf '[REMOTE COMMAND] %s\n' "\$display" >&2
+  if [ "\${BASH_SUBSHELL:-0}" -gt 0 ]; then
+    command timeout "${A6_TIMEOUT}s" /usr/bin/ssh \
+      -o BatchMode=yes -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+      -o ConnectTimeout="${A6_TIMEOUT}" -o ConnectionAttempts=1 \
+      -o GSSAPIAuthentication=no "\$@" | tee /dev/stderr
+    rc="\${PIPESTATUS[0]}"
+  else
+    command timeout "${A6_TIMEOUT}s" /usr/bin/ssh \
+      -o BatchMode=yes -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+      -o ConnectTimeout="${A6_TIMEOUT}" -o ConnectionAttempts=1 \
+      -o GSSAPIAuthentication=no "\$@"
+    rc="\$?"
+  fi
+  if [ "\$rc" -eq 0 ]; then
+    printf '[SSH RESULT: PASS, exit=0]\n' >&2
+  else
+    printf '[SSH RESULT: FAIL, exit=%s]\n' "\$rc" >&2
+  fi
+  return "\$rc"
 }
+if [ "${A6_TRACE}" = 1 ]; then
+  exec 19> >(sed -u \
+    -e 's/Skill39@A6/<PASSWORD-REDACTED>/g' \
+    -e 's/Reader39@A6/<PASSWORD-REDACTED>/g' \
+    -e 's/Skill39-A6-Monitor!/<PASSWORD-REDACTED>/g' >&2)
+  export BASH_XTRACEFD=19
+  PS4='[TRACE] '
+  set -x
+fi
 EOF
     printf '%s\n' "$command"
   } > "$tmp"
   chmod 700 "$tmp"
   divider; echo -e "${BLUE}Full actual output (stdout/stderr):${NC}"
   echo -e "${BLUE}[COORDINATOR: $(hostname -s 2>/dev/null || hostname)]${NC}"
+  echo -e "${BLUE}[AUTOMATIC CHECK COMMAND; passwords redacted]${NC}"
+  sed -e 's/Skill39@A6/<PASSWORD-REDACTED>/g' \
+      -e 's/Reader39@A6/<PASSWORD-REDACTED>/g' \
+      -e 's/Skill39-A6-Monitor!/<PASSWORD-REDACTED>/g' <<<"$command"
   timeout "$A6_CMD_TIMEOUT" bash "$tmp" </dev/null 2>&1 | tee -a "$A6_DETAIL_LOG" "$out_file"
   A6_LAST_RC="${PIPESTATUS[0]}"; A6_LAST_OUT="$(cat "$out_file")"
   [ -s "$out_file" ] || echo "(empty output)"
@@ -110,7 +149,7 @@ command_for() {
 10.76.40.20 10.76.40.20 10.76.40.1
 EOF
 echo A6_OK" ;;
-    A1.03) echo "for h in 10.76.10.100 10.76.20.100; do ssh root@\$h 'ip -4 -br a | grep -qE \"10\\.76\\.(10|20)\\.100/24\" && { nmcli -t -f ipv4.method con show 2>/dev/null | grep -qi auto || grep -RqiE \"^[[:space:]]*(iface .* inet dhcp|DHCP[[:space:]]*=[[:space:]]*(yes|ipv4|true))\" /etc/network/interfaces /etc/network/interfaces.d /etc/systemd/network 2>/dev/null; }' || exit 1; done; echo A6_OK" ;;
+    A1.03) echo "failed=0; for x in '10.76.10.100 10.76.10.100' '10.76.20.100 10.76.20.100'; do set -- \$x; h=\$1; expected=\$2; o=\$(ssh root@\$h 'echo ===IPV4===; ip -4 -br addr; echo ===DEFAULT-ROUTE===; ip route show default; echo ===DHCP-LEASES===; find /run/systemd/netif/leases /var/lib/dhcp /var/lib/NetworkManager -maxdepth 2 -type f -exec grep -HE \"ADDRESS=|fixed-address|ip_address=|dhcp\" {} + 2>/dev/null || true; echo ===PERSISTENT-PROFILE===; nmcli -t -f NAME,TYPE,ipv4.method con show 2>/dev/null || grep -RhEv \"^[[:space:]]*(#|\$)\" /etc/network/interfaces /etc/network/interfaces.d /etc/systemd/network 2>/dev/null'); rc=\$?; printf '%s\\n' \"\$o\"; live=\$(sed -n '/^===IPV4===\$/,/^===DEFAULT-ROUTE===\$/p' <<<\"\$o\"); if [ \$rc -eq 0 ] && grep -Eq \"\$expected/24([[:space:]]|\$)\" <<<\"\$live\"; then echo \"ADDRESS_OK: \$expected/24\"; else echo \"ADDRESS_FAIL: expected \$expected/24\"; failed=1; fi; if grep -qiE 'ipv4.method:auto|iface .* inet dhcp|DHCP[[:space:]]*=[[:space:]]*(yes|ipv4|true)|:(ADDRESS=|fixed-address|ip_address=)' <<<\"\$o\"; then echo 'DHCP_PROFILE_OK'; else echo 'DHCP_PROFILE_FAIL: no active lease or persistent DHCP profile found'; failed=1; fi; done; [ \$failed -eq 0 ] && echo A6_OK" ;;
     A1.04) echo "for h in 10.76.10.1 10.76.20.1; do ssh root@\$h 'test \"\$(sysctl -n net.ipv4.ip_forward)\" = 1 && grep -RqsE \"net.ipv4.ip_forward[[:space:]]*=[[:space:]]*1\" /etc/sysctl.conf /etc/sysctl.d' || exit 1; done; ssh root@10.76.10.1 'for d in 10.76.20.10 10.76.30.10 10.76.40.20; do ip route get \$d | grep -q wg0 || exit 1; done' && ssh root@10.76.20.1 'ip route get 10.76.10.100 | grep -q wg0' && echo A6_OK" ;;
     A1.05) echo "a=\$(ssh root@10.76.10.1 'ip -4 a show wg0; wg show wg0'); b=\$(ssh root@10.76.20.1 'ip -4 a show wg0; wg show wg0'); aip=\$(sed -n 's/.*allowed ips: //p' <<<\"\$a\" | tr ',' '\\n' | xargs -n1 | sort | tr '\\n' ' '); bip=\$(sed -n 's/.*allowed ips: //p' <<<\"\$b\" | tr ',' '\\n' | xargs -n1 | sort | tr '\\n' ' '); grep -q '10.200.6.1/30' <<<\"\$a\" && grep -q 'listening port: 51820' <<<\"\$a\" && grep -q 'endpoint: 198.18.76.20:51820' <<<\"\$a\" && [ \"\$aip\" = '10.76.20.0/24 10.76.30.0/24 10.76.40.0/24 ' ] && grep -q '10.200.6.2/30' <<<\"\$b\" && grep -q 'listening port: 51820' <<<\"\$b\" && grep -q 'endpoint: 198.18.76.10:51820' <<<\"\$b\" && [ \"\$bip\" = '10.76.10.0/24 ' ] && echo A6_OK" ;;
     A1.06) echo "ssh root@10.76.10.1 'ping -c1 -W2 10.200.6.2 >/dev/null && hs=\$(wg show wg0 latest-handshakes | awk \"{print \\$2}\") && test \"\$hs\" -gt 0 && test \$((\$(date +%s)-hs)) -le 120 && systemctl is-active --quiet wg-quick@wg0 && systemctl is-enabled --quiet wg-quick@wg0' && ssh root@10.76.20.1 'systemctl is-active --quiet wg-quick@wg0 && systemctl is-enabled --quiet wg-quick@wg0' && echo A6_OK" ;;

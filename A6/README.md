@@ -39,6 +39,16 @@ sudo bash remote/a6-evaluate-remote.sh --no-pause \
   --start-from D1.01 --report-dir /opt/grading/a6/eval-report
 ```
 
+По умолчанию evaluator выводит на экран координатор, устройство, удалённую
+команду, stdout/stderr, SSH exit code и раскрытый `[TRACE]` автоматической
+логики. Из trace автоматически скрываются известные пароли. Для компактного
+вывода трассировку можно отключить, сохранив результаты команд и exit codes:
+
+```bash
+sudo bash remote/a6-evaluate-remote.sh --no-trace \
+  --report-dir /opt/grading/a6/eval-report
+```
+
 Сначала выполняйте обычное оценивание. Контролируемые остановки DNS/SMB,
 `docker compose down/up` и перезапуск Docker запускайте последними:
 
