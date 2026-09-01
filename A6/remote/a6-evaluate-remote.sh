@@ -74,7 +74,7 @@ a6_local_tool() {
   local tool="\$1"; shift
   local name display rc
   name="\$(basename "\${tool:-missing-tool}")"
-  display="\$(printf '%q ' "\$@")"
+  display="\$(printf '%s ' "\$@")"
   display="\${display//Skill39@A6/<PASSWORD-REDACTED>}"
   display="\${display//Reader39@A6/<PASSWORD-REDACTED>}"
   display="\${display//Skill39-A6-Monitor!/<PASSWORD-REDACTED>}"
@@ -115,7 +115,7 @@ ssh() {
     *) label="\$target" ;;
   esac
   printf '\n[DEVICE: %s]\n' "\$label" >&2
-  display="\$(printf '%q ' "\${@:2}")"
+  display="\$(printf '%s ' "\${@:2}")"
   display="\${display//Skill39@A6/<PASSWORD-REDACTED>}"
   display="\${display//Reader39@A6/<PASSWORD-REDACTED>}"
   display="\${display//Skill39-A6-Monitor!/<PASSWORD-REDACTED>}"
