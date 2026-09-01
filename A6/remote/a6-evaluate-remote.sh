@@ -8,7 +8,6 @@ source "$SCRIPT_DIR/../common/a6-common.sh"
 A6_HOSTS_FILE="${A6_HOSTS_FILE:-$SCRIPT_DIR/a6-hosts.conf}"
 A6_START_FROM="${A6_START_FROM:-A1.01}"
 A6_DISRUPTIVE="${A6_DISRUPTIVE:-0}"
-A6_TRACE="${A6_TRACE:-1}"
 A6_LAST_RC=0
 A6_LAST_OUT=""
 
@@ -20,8 +19,6 @@ Usage: sudo bash remote/a6-evaluate-remote.sh [options]
   --start-from C1.04      resume from an aspect
   --report-dir DIR        report output directory
   --disruptive            include controlled stop/restart/down/up checks
-  --trace                 show expanded automatic commands (default)
-  --no-trace              hide expanded command trace
   --hosts-file FILE       override host map
 EOF
 }
@@ -31,8 +28,6 @@ while [ $# -gt 0 ]; do
     --no-pause) A6_PAUSE=0 ;;
     --pause) A6_PAUSE=1 ;;
     --disruptive) A6_DISRUPTIVE=1 ;;
-    --trace) A6_TRACE=1 ;;
-    --no-trace) A6_TRACE=0 ;;
     --start-from) shift; A6_START_FROM="${1:?missing --start-from value}" ;;
     --report-dir) shift; A6_REPORT_DIR="${1:?missing --report-dir value}" ;;
     --hosts-file) shift; A6_HOSTS_FILE="${1:?missing --hosts-file value}" ;;
@@ -71,6 +66,42 @@ run_command() {
     cat <<EOF
 #!/usr/bin/env bash
 set -o pipefail
+for tool_name in curl nc openssl docker smbclient getent systemctl python3; do
+  tool_path="\$(type -P "\$tool_name" 2>/dev/null || true)"
+  printf -v "A6_REAL_\${tool_name^^}" '%s' "\$tool_path"
+done
+a6_local_tool() {
+  local tool="\$1"; shift
+  local name display rc
+  name="\$(basename "\${tool:-missing-tool}")"
+  display="\$(printf '%q ' "\$@")"
+  display="\${display//Skill39@A6/<PASSWORD-REDACTED>}"
+  display="\${display//Reader39@A6/<PASSWORD-REDACTED>}"
+  display="\${display//Skill39-A6-Monitor!/<PASSWORD-REDACTED>}"
+  printf '\n[DEVICE: ops-a6 (local coordinator)]\n' >&2
+  printf '[COMMAND] %s %s\n' "\$name" "\$display" >&2
+  printf '[OUTPUT]\n' >&2
+  if [ -z "\$tool" ]; then
+    printf '%s: command not found\n' "\$name" >&2
+    rc=127
+  elif [ "\${BASH_SUBSHELL:-0}" -gt 0 ]; then
+    command "\$tool" "\$@" | tee /dev/stderr
+    rc="\${PIPESTATUS[0]}"
+  else
+    command "\$tool" "\$@"
+    rc="\$?"
+  fi
+  printf '[RESULT: exit=%s]\n' "\$rc" >&2
+  return "\$rc"
+}
+curl() { a6_local_tool "\$A6_REAL_CURL" "\$@"; }
+nc() { a6_local_tool "\$A6_REAL_NC" "\$@"; }
+openssl() { a6_local_tool "\$A6_REAL_OPENSSL" "\$@"; }
+docker() { a6_local_tool "\$A6_REAL_DOCKER" "\$@"; }
+smbclient() { a6_local_tool "\$A6_REAL_SMBCLIENT" "\$@"; }
+getent() { a6_local_tool "\$A6_REAL_GETENT" "\$@"; }
+systemctl() { a6_local_tool "\$A6_REAL_SYSTEMCTL" "\$@"; }
+python3() { a6_local_tool "\$A6_REAL_PYTHON3" "\$@"; }
 ssh() {
   local target="\${1:-unknown}" label display rc
   case "\$target" in
@@ -84,11 +115,12 @@ ssh() {
     *) label="\$target" ;;
   esac
   printf '\n[DEVICE: %s]\n' "\$label" >&2
-  display="\$(printf '%q ' "\$@")"
+  display="\$(printf '%q ' "\${@:2}")"
   display="\${display//Skill39@A6/<PASSWORD-REDACTED>}"
   display="\${display//Reader39@A6/<PASSWORD-REDACTED>}"
   display="\${display//Skill39-A6-Monitor!/<PASSWORD-REDACTED>}"
-  printf '[REMOTE COMMAND] %s\n' "\$display" >&2
+  printf '[COMMAND] %s\n' "\${display:-<interactive shell>}" >&2
+  printf '[OUTPUT]\n' >&2
   if [ "\${BASH_SUBSHELL:-0}" -gt 0 ]; then
     command timeout "${A6_TIMEOUT}s" /usr/bin/ssh \
       -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -105,31 +137,17 @@ ssh() {
     rc="\$?"
   fi
   if [ "\$rc" -eq 0 ]; then
-    printf '[SSH RESULT: PASS, exit=0]\n' >&2
+    printf '[RESULT: exit=0]\n' >&2
   else
-    printf '[SSH RESULT: FAIL, exit=%s]\n' "\$rc" >&2
+    printf '[RESULT: exit=%s]\n' "\$rc" >&2
   fi
   return "\$rc"
 }
-if [ "${A6_TRACE}" = 1 ]; then
-  exec 19> >(sed -u \
-    -e 's/Skill39@A6/<PASSWORD-REDACTED>/g' \
-    -e 's/Reader39@A6/<PASSWORD-REDACTED>/g' \
-    -e 's/Skill39-A6-Monitor!/<PASSWORD-REDACTED>/g' >&2)
-  export BASH_XTRACEFD=19
-  PS4='[TRACE] '
-  set -x
-fi
 EOF
     printf '%s\n' "$command"
   } > "$tmp"
   chmod 700 "$tmp"
-  divider; echo -e "${BLUE}Full actual output (stdout/stderr):${NC}"
-  echo -e "${BLUE}[COORDINATOR: $(hostname -s 2>/dev/null || hostname)]${NC}"
-  echo -e "${BLUE}[AUTOMATIC CHECK COMMAND; passwords redacted]${NC}"
-  sed -e 's/Skill39@A6/<PASSWORD-REDACTED>/g' \
-      -e 's/Reader39@A6/<PASSWORD-REDACTED>/g' \
-      -e 's/Skill39-A6-Monitor!/<PASSWORD-REDACTED>/g' <<<"$command"
+  divider; echo -e "${BLUE}Automatic command execution:${NC}"
   timeout "$A6_CMD_TIMEOUT" bash "$tmp" </dev/null 2>&1 | tee -a "$A6_DETAIL_LOG" "$out_file"
   A6_LAST_RC="${PIPESTATUS[0]}"; A6_LAST_OUT="$(cat "$out_file")"
   [ -s "$out_file" ] || echo "(empty output)"

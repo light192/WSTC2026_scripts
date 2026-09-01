@@ -87,7 +87,7 @@ cmd_show() {
   divider
   echo -e "${BLUE}Manual verification procedure:${NC}"
   printf '%s\n' "$display"
-  echo -e "${BLUE}The automatic check runs below without extra scaffolding output.${NC}"
+  echo -e "${BLUE}Each automatic check command and its result are shown below.${NC}"
 }
 show_output() { [ -z "$A6_PENDING_OUTPUT" ] || A6_PENDING_OUTPUT+=$'\n'; A6_PENDING_OUTPUT+="${1:-(empty output)}"; }
 flush_output() {
